@@ -123,6 +123,9 @@ let trouble: string[] = [];
 const requests = new Map<string, string>();
 /** Requests sent and not answered yet */
 const underWay = new Set<string>();
+/** Requests a member's page made that the server refused them: the page asked for what is not theirs */
+let forbidden: string[] = [];
+let watchForbidden = false;
 const missing: { id: string; line: string }[] = [];
 /** Requests the server answered with 5xx; what it said is asked for when the page has settled */
 let failed: { id: string; line: string }[] = [];
@@ -193,7 +196,7 @@ if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Cou
 
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
-  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/links", "#/activity",
+  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/links", "#/activity", "#/blocks",
   "#/machines", "#/machines/load", "#/containers", "#/containers/settings", "#/machines/this/apps", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
   ...new Set(tabs),
   "#/settings/users/access", "#/settings/users/invites", "#/settings/users/signins",
@@ -267,7 +270,7 @@ const STEPS = `(() => {
     if (card.closest("dialog") || !seen(card)) continue;
     const kids = [...card.children].filter(seen);
     for (let i = 1; i < kids.length; i++) {
-      if (kids[i].matches(".block-foot, .module-card-foot")) continue;
+      if (kids[i].matches(".block-foot, .module-card-foot, .ui-foot")) continue;
       const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect();
       if (b.top < a.bottom - 1) continue; // side by side
       const gap = Math.round(b.top - a.bottom);
@@ -299,9 +302,6 @@ const KEYS = `(() => {
   return [...out].slice(0, 5);
 })()`;
 
-/** Requests a member's page made that the server refused them: the page asked for what is not theirs */
-let forbidden: string[] = [];
-let watchForbidden = false;
 
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
@@ -331,6 +331,8 @@ async function walk(label: string, phone: boolean): Promise<void> {
       const picture = await send("Page.captureScreenshot", { format: "png" });
       await Bun.write(join(shotsAt, `${label}${route.replace(/[#/]+/g, "-")}.png`), Buffer.from(picture.data, "base64"));
     }
+    // the assistant's window stays open over every page after it: closed, so the pictures show the pages
+    if (route === "#/assistant") await js<unknown>("(typeof closeAssistant === 'function' && closeAssistant(), true)");
     console.log(`${found.length ? "✗" : "✓"} ${label} ${route}`);
     for (const line of new Set(found)) {
       console.log(`    ${line}`);

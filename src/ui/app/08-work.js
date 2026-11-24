@@ -5,7 +5,7 @@
 // The compose file as fields. The server reads the file into rows and puts
 // the answers back; a row carries `from` — the entry of the file it shows — so what is not touched stays.
 
-const formRow = (label, control, note) => h("label", { class: "form-row" }, h("span", { class: "form-label" }, label), h("span", { class: "form-control" }, control, note && h("span", { class: "muted small" }, note)));
+const formRow = (label, control, note) => uiFormRow(label, control, note);
 
 /** A select that also offers the value the file has when it is not one of the usual ones */
 function choice(value, options, label) {
@@ -16,21 +16,19 @@ function choice(value, options, label) {
 /** A list of the form: rows of inputs, each with a button to take it out, and a button to add one */
 function rowList(title, hint, items, cells) {
   const rows = [];
-  const box = h("div", { class: "edit-rows" });
+  const box = h("div", { class: "stack-s" });
   const add = (item, focus) => {
     const row = {};
     const remove = h("button", { type: "button", class: "icon-btn", "aria-label": t("app.remove"), title: t("app.remove"), onclick: () => (rows.splice(rows.indexOf(row), 1), row.el.remove()) }, icon("trash"));
     if (item.raw !== undefined) {
-      row.el = h("div", { class: "edit-row" }, h("span", { class: "mono small grow raw", title: t("edit.rawHint") }, item.raw), remove);
+      row.el = uiInputs([uiReadOnly(item.raw, t("edit.rawHint")), remove]);
       row.value = () => item;
     } else {
       const inputs = cells.map((c) => (c.options ? choice(item[c.key], c.options, c.label) : h("input", { value: item[c.key] ?? "", placeholder: c.label, "aria-label": c.label, class: "mono " + (c.class ?? ""), spellcheck: false, autocapitalize: "none", autocomplete: "off" })));
       // a folder of the server can be chosen instead of typed: the disks are offered there too
       const cellsOf = inputs.map((input, i) =>
         cells[i].pick
-          ? h(
-              "span",
-              { class: "with-pick" },
+          ? uiInputs([
               input,
               h("button", {
                 type: "button",
@@ -39,10 +37,10 @@ function rowList(title, hint, items, cells) {
                 "aria-label": t("edit.pickFolder"),
                 onclick: () => folderPicker({ title: t("edit.pickFolder"), start: input.value.startsWith("/") ? input.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void (input.value = path) }),
               }, icon("folder")),
-            )
+            ], { tight: true })
           : input,
       );
-      row.el = h("div", { class: "edit-row" }, cellsOf, remove);
+      row.el = uiInputs([...cellsOf, remove]);
       row.value = () => ({ ...(item.from === undefined ? {} : { from: item.from }), ...Object.fromEntries(cells.map((c, i) => [c.key, inputs[i].value])) });
       // a row added and left empty was not meant
       row.empty = () => item.from === undefined && inputs.every((input) => input.tagName === "SELECT" || input.value.trim() === "");
@@ -54,7 +52,7 @@ function rowList(title, hint, items, cells) {
   items.forEach((item) => add(item));
   const blank = Object.fromEntries(cells.map((c) => [c.key, c.options ? c.options[0][0] : ""]));
   return {
-    el: h("div", { class: "form-row" }, h("span", { class: "form-label" }, title), h("div", { class: "form-control" }, box, h("div", null, button(t("edit.add"), { class: "small", onclick: () => add(blank, true) }, "plus")), hint && h("span", { class: "muted small" }, hint))),
+    el: uiFormRow(title, [box, h("div", null, button(t("edit.add"), { class: "small", onclick: () => add(blank, true) }, "plus"))], hint, { group: true }),
     value: () => rows.filter((row) => !row.empty?.()).map((row) => row.value()),
   };
 }
@@ -94,9 +92,7 @@ function serviceForm(service, memoryTotal) {
   const hostname = text(service.hostname);
 
   return {
-    el: h(
-      "div",
-      { class: "stack edit-service" },
+    el: uiForm(
       formRow(t("edit.image"), image),
       formRow(t("edit.network"), network),
       ports.el,
@@ -105,7 +101,7 @@ function serviceForm(service, memoryTotal) {
       devices.el,
       command.el,
       formRow(t("edit.privileged"), h("span", null, privileged), t("edit.privilegedHint")),
-      formRow(t("edit.memory"), h("span", { class: "pair" }, slider, memory, h("span", { class: "muted small" }, "MB")), t("edit.memoryHint", { total: bytes(memoryTotal * 1024 * 1024) })),
+      formRow(t("edit.memory"), uiInputs([slider, memory, h("span", { class: "muted small" }, "MB")]), t("edit.memoryHint", { total: bytes(memoryTotal * 1024 * 1024) })),
       formRow(t("edit.cpuShares"), cpu),
       formRow(t("edit.restart"), restart),
       formRow(t("edit.capAdd"), caps, t("edit.capAddHint")),
@@ -146,8 +142,8 @@ async function uploadAppIcon(name, picture) {
 function iconField(model, app) {
   const url = h("input", { value: model.icon, type: "url", spellcheck: false, class: "mono", placeholder: "https://…", "aria-label": t("edit.iconUrl"), oninput: () => paint() });
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/avif,image/svg+xml", hidden: true });
-  const preview = h("span", { class: "icon-preview" });
-  const actions = h("span", { class: "pair" });
+  const preview = uiLead({ icon: "image" });
+  const actions = uiLine([]);
   const note = h("span", { class: "muted small" });
   const field = { el: null, url, picked: null };
   let own = model.ownIcon ?? "";
@@ -198,7 +194,7 @@ function iconField(model, app) {
     }
   });
   paint();
-  field.el = h("div", { class: "form-row" }, h("span", { class: "form-label" }, t("edit.icon")), h("div", { class: "form-control" }, h("div", { class: "icon-field" }, preview, url, actions, file), note));
+  field.el = uiFormRow(t("edit.icon"), [uiInputs([preview, url, actions, file]), note], null, { group: true });
   return field;
 }
 
@@ -226,22 +222,19 @@ function appSettingsForm(model, memoryTotal, app, installed) {
   // the services are tabs: one is added by name, the one shown can be taken out
   const services = model.services.map((service) => ({ name: service.name, form: serviceForm(service, memoryTotal) }));
   let shown = 0;
-  const tabs = h("div", { class: "modes" });
+  const tabs = h("div");
   const body = h("div", null, services.map((service) => service.form.el));
   const paint = () => {
     put(
       tabs,
-      services.map((service, i) => {
-        const label = service.name || t("edit.mainService");
-        return h(
-          "span",
-          { class: "mode tab-mode" + (i === shown ? " active" : "") },
-          h("button", { type: "button", class: "mode-name", onclick: () => ((shown = i), paint()) }, label),
+      uiChips(
+        services.map((service, i) => {
+          const label = service.name || t("edit.mainService");
           // the last service stays: an app without one is removed as a whole
-          services.length > 1 && h("button", { type: "button", class: "mode-x", title: t("edit.removeService"), "aria-label": `${t("edit.removeService")}: ${label}`, onclick: () => confirmRemove(i, label) }, icon("x")),
-        );
-      }),
-      button(t("edit.addService"), { class: "small ghost", onclick: addService }, "plus"),
+          return { label, active: i === shown, onclick: () => ((shown = i), paint()), remove: services.length > 1 && { label: `${t("edit.removeService")}: ${label}`, run: () => confirmRemove(i, label) } };
+        }),
+        button(t("edit.addService"), { class: "small ghost", onclick: addService }, "plus"),
+      ),
     );
     services.forEach((service, i) => (service.form.el.hidden = i !== shown));
   };
@@ -269,15 +262,13 @@ function appSettingsForm(model, memoryTotal, app, installed) {
   };
   paint();
   return {
-    el: h(
-      "div",
-      { class: "stack edit-form" },
+    el: uiForm(
       h("datalist", { id: "capabilities" }, CAPABILITIES.map((cap) => h("option", { value: cap }))),
       formRow(t("edit.title"), title),
       iconField_.el,
-      formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), t("edit.webUiHint")),
-      domains.length > 0 && h("label", { class: "form-row" }, h("span", { class: "form-label" }, t("edit.webDomain")), h("span", { class: "form-control" }, h("span", { class: "web-address" }, domain, h("span", { class: "muted mono" }, "." + domains[0])), domainHint)),
-      h("div", { class: "form-row services-row" }, h("span", { class: "form-label" }, t("edit.services")), tabs),
+      formRow(t("edit.webUi"), uiInputs([scheme, host, h("span", { class: "muted" }, ":"), port, path]), t("edit.webUiHint")),
+      domains.length > 0 && formRow(t("edit.webDomain"), [uiInputs([domain, h("span", { class: "muted mono" }, "." + domains[0])]), domainHint]),
+      uiFormRow(t("edit.services"), tabs, null, { group: true }),
       body,
     ),
     pickedIcon: () => iconField_.picked,
@@ -296,11 +287,14 @@ async function appSettingsTab(app, box) {
   // an app of Hata's format: its own settings, kept in .env, come first
   const env = model.settings ? settingFields(model.settings, false) : null;
   const error = h("p", { class: "error", role: "alert" });
-  box.replaceChildren(
+  put(
+    box,
+    uiCard(
+      { lead: t("edit.lead") },
     h(
       "form",
       {
-        class: "card pad stack",
+        class: "stack",
         onsubmit: async (e) => {
           e.preventDefault();
           error.textContent = "";
@@ -312,12 +306,12 @@ async function appSettingsTab(app, box) {
           }
         },
       },
-      h("p", { class: "muted small" }, t("edit.lead")),
-      env && env.rows.length > 0 && h("div", { class: "stack edit-form" }, formSection(t("store.settings"), t("edit.envHint"), env.rows), env.more),
+      env && env.rows.length > 0 && uiForm(formSection(t("store.settings"), t("edit.envHint"), env.rows), env.more),
       env && env.rows.length === 0 && env.more,
       form.el,
       error,
-      h("footer", { class: "pair" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`), h("button", { class: "btn primary" }, t("app.saveApply"))),
+      uiFoot(uiCommand(`docker compose -p ${app.name} up -d --remove-orphans`), h("button", { class: "btn primary" }, t("app.saveApply"))),
+    ),
     ),
   );
 }
@@ -329,7 +323,7 @@ async function appComposeTab(app, box) {
   } catch (e) {
     return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
   }
-  const area = h("textarea", { class: "code page", spellcheck: false, value: text, wrap: "off", "aria-label": "compose.yml" });
+  const area = uiCodeEditor({ value: text, wrap: "off", "aria-label": "compose.yml" }, { page: true });
   const error = h("p", { class: "error", role: "alert" });
   const save = button(t("app.saveApply"), {
     class: "primary",
@@ -347,7 +341,7 @@ async function appComposeTab(app, box) {
     },
   });
   area.addEventListener("input", () => (save.disabled = area.value === text));
-  box.replaceChildren(h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", { class: "mono small" }, app.composeFile), h("p", { class: "muted small" }, t("app.composeLead"))), save), area, error, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`));
+  put(box, uiCard({ title: h("span", { class: "mono" }, app.composeFile), lead: t("app.composeLead"), actions: save }, area, error, uiCommand(`docker compose -p ${app.name} up -d --remove-orphans`)));
 }
 
 /** Ends a running operation that can be ended before its time */
@@ -550,11 +544,7 @@ function jobDetail(e, row = false) {
 
 /** The parts of the bar: an install has its three steps, anything else one */
 function jobBars(e) {
-  const paint = (one, state_, pct = null) => {
-    one.className = "jt-seg " + state_;
-    one.firstChild.style.width = pct === null ? "" : pct + "%";
-    one.setAttribute("aria-hidden", "true");
-  };
+  const paint = uiWorkSeg;
   return { paint, count: e.kind === "install" ? JOB_STEPS.length : 1 };
 }
 
@@ -576,7 +566,7 @@ function paintJobBar(bar, e) {
 }
 
 const jobBar = (e) => {
-  const bar = h("span", { class: "jt-bar" }, Array.from({ length: jobBars(e).count }, () => h("span", { class: "jt-seg" }, h("i"))));
+  const bar = uiWorkBar(jobBars(e).count);
   paintJobBar(bar, e);
   return bar;
 };
@@ -594,13 +584,13 @@ function closeJob(id) {
 function patchJobs() {
   for (const e of jobsUi.list.values()) {
     for (const root of document.querySelectorAll(`[data-job="${e.id}"]`)) {
-      const sub = root.querySelector(".jt-sub");
+      const sub = root.querySelector(".ui-work-sub");
       if (sub) sub.textContent = jobSub(e);
-      const detail = root.querySelector(".jt-detail");
+      const detail = root.querySelector(".ui-work-detail");
       if (detail) detail.textContent = jobDetail(e, root.classList.contains("row"));
-      const short = root.querySelector(".jt-short");
+      const short = root.querySelector(".ui-work-short");
       if (short) short.textContent = e.status === "running" ? jobShort(e) : jobSub(e) || t("job.failed");
-      const bar = root.querySelector(".jt-bar");
+      const bar = root.querySelector(".ui-work-bar");
       if (bar && e.status === "running") paintJobBar(bar, e);
     }
     if (e.status !== "running") continue;
@@ -618,31 +608,39 @@ function jobCard(e, row = false) {
   const page = e.status === "done" && e.kind === "install" && !e.machine ? `#/apps/${e.app}` : null;
   const notes = jobNotes(e);
   const signIn = jobLogin(e);
-  return h(
-    "div",
-    { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
-    h("div", { class: "jt-head" },
-      appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
-      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !isFileJob(e) && !ended ? " mono" : "") }, jobSub(e))),
-      row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
-      row && signIn && signIn.login.kind !== "none" && h("button", { type: "button", class: "icon-btn", title: t("app.login"), "aria-label": `${t("app.login")}: ${jobName(e)}`, onclick: () => loginDialog(jobName(e), signIn.login, signIn.ask) }, icon("key")),
-      row && !ended && isFileJob(e) && h("button", { type: "button", class: "icon-btn", title: t("jobs.stopFiles"), "aria-label": `${t("jobs.stopFiles")}: ${jobName(e)}`, onclick: () => stopFileJob(e) }, icon("stop")),
-      row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
+  const lead = appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : "");
+  const tool = (label, iconName, onclick, attrs = {}) => h(attrs.href ? "a" : "button", { type: attrs.href ? null : "button", class: "icon-btn", title: label, "aria-label": `${label}: ${jobName(e)}`, onclick, ...attrs }, icon(iconName));
+  return uiWork({
+    id: e.id,
+    row,
+    status: e.status,
+    stopped: !!e.stopped,
+    lead,
+    title: jobHeading(e),
+    sub: jobSub(e),
+    subMono: e.kind !== "install" && !isFileJob(e) && !ended,
+    tools: [
+      row && (url || page) && tool(t("common.open"), "external", () => closeJob(e.id), { href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}) }),
+      row && signIn && signIn.login.kind !== "none" && tool(t("app.login"), "key", () => loginDialog(jobName(e), signIn.login, signIn.ask)),
+      row && !ended && isFileJob(e) && tool(t("jobs.stopFiles"), "stop", () => stopFileJob(e)),
+      row && tool(t("jobs.showLog"), "logs", () => jobLog(e)),
       ended
-        ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
+        ? tool(t("jobs.dismiss"), "x", () => closeJob(e.id))
         : !row && h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down")),
-    ),
-    !ended && jobBar(e),
-    h("p", { class: "jt-detail" + (jobWaits(e) ? " why" : "") }),
-    !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small jt-left" }, t("jobs.leftOver")),
-    !row && signIn && h("div", { class: "jt-login" }, signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)),
-    !row && h("div", { class: "jt-actions" },
+    ],
+    bar: !ended && jobBar(e),
+    why: jobWaits(e),
+    extra: [
+      !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small" }, t("jobs.leftOver")),
+      !row && signIn && uiProse([signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)], { soft: true }),
+    ],
+    actions: !row && [
       button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
       !ended && isFileJob(e) && button(t("jobs.stopFiles"), { class: "small", onclick: () => stopFileJob(e) }, "stop"),
       notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
       (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
-    ),
-  );
+    ],
+  });
 }
 
 function minimiseJobs(min) {
@@ -656,12 +654,7 @@ function jobStrip(shown) {
   const failed = shown.filter(jobWaits);
   const first = shown[0];
   const words = shown.length === 1 ? jobName(first) : failed.length && running.length ? t("jobs.counts", { n: running.length, m: failed.length }) : failed.length ? t("jobs.countsFailed", { m: failed.length }) : running.length ? t("jobs.countsRunning", { n: running.length }) : t("job.done");
-  return h("button", { type: "button", class: "jt-strip", "data-job": first.id, "aria-label": `${t("jobs.restore")}: ${words}`, onclick: () => minimiseJobs(false) },
-    appIcon({ name: first.app, title: jobName(first), icon: first.icon }, "sm"),
-    h("span", { class: "jt-words" }, h("strong", { class: "jt-title" }, words), shown.length === 1 && h("span", { class: "jt-short" })),
-    icon("up"),
-    !jobEnded(first) && h("span", { class: "jt-thin" }, jobBar(first)),
-  );
+  return uiWorkStrip({ id: first.id, label: `${t("jobs.restore")}: ${words}`, onclick: () => minimiseJobs(false), lead: appIcon({ name: first.app, title: jobName(first), icon: first.icon }, "sm"), title: words, short: shown.length === 1, bar: !jobEnded(first) && jobBar(first) });
 }
 
 function paintJobs() {
@@ -690,12 +683,10 @@ function paintJobs() {
       const failed = shown.filter(jobWaits).length;
       const counted = failed && running ? t("jobs.counts", { n: running, m: failed }) : failed ? t("jobs.countsFailed", { m: failed }) : running ? t("jobs.countsRunning", { n: running }) : t("job.done");
       const rows = jobsUi.all ? shown : shown.slice(0, JOB_ROWS);
-      tray.replaceChildren(h("div", { class: "jt-list" },
-        h("div", { class: "jt-list-head" },
-          h("strong", null, counted),
-          h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down"))),
+      tray.replaceChildren(uiWorkList(
+        [h("strong", null, counted), h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down"))],
         rows.map((e) => jobCard(e, true)),
-        shown.length > rows.length && h("button", { type: "button", class: "jt-more", onclick: () => ((jobsUi.all = true), paintJobs()) }, t("jobs.showMore", { n: shown.length - rows.length })),
+        shown.length > rows.length && button(t("jobs.showMore", { n: shown.length - rows.length }), { class: "quiet", onclick: () => ((jobsUi.all = true), paintJobs()) }),
       ));
     }
   }
@@ -798,8 +789,9 @@ setInterval(() => {
 
 /** Shows a running operation: its console output and how it ended */
 async function jobDialog(id, kind, title, onDone) {
-  const log = h("pre", { class: "console" });
-  const status = h("p", { class: "job-status running" }, t("job.running"));
+  const log = uiLog();
+  const status = h("span", null, uiState("info", t("job.running")));
+  let running = true;
   let dialog;
   const close = button(t("job.hide"), { onclick: () => dialog.close() });
   const stop = stopButton(id);
@@ -811,8 +803,8 @@ async function jobDialog(id, kind, title, onDone) {
     if (stick) log.scrollTop = log.scrollHeight;
   };
   const finish = (job) => {
-    status.className = "job-status " + (job.stopped ? "stopped" : job.status);
-    status.textContent = job.status === "done" ? t("job.done") : job.stopped ? t("job.stopped") : t("job.failed");
+    running = false;
+    put(status, job.status === "done" ? uiState("ok", t("job.done")) : job.stopped ? uiState("warn", t("job.stopped")) : uiState("bad", t("job.failed")));
     close.lastChild.textContent = t("common.close");
     stop.hidden = true;
     jobListeners.delete(listener);
@@ -845,7 +837,7 @@ async function jobDialog(id, kind, title, onDone) {
     jobListeners.delete(listener);
     jobsUi.logs.delete(id);
     // closed while it runs: it goes on out of sight, and the card keeps telling
-    if (status.classList.contains("running") && !jobsUi.list.has(id)) jobInBackground(id, kind, title, onDone);
+    if (running && !jobsUi.list.has(id)) jobInBackground(id, kind, title, onDone);
     const e = jobsUi.list.get(id);
     if (e) e.left = JOB_LINGER_S;
     paintJobs();
@@ -873,8 +865,8 @@ function removeDialog(app) {
     "confirm",
     h("h2", null, t("app.removeTitle", { title: app.title })),
     h("p", { class: "muted" }, t("app.removeLead")),
-    h("label", { class: "check" }, withData, h("span", null, t("app.removeData", { path }))),
-    h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} down`),
+    uiCheck(t("app.removeData", { path }), withData),
+    uiCommand(`docker compose -p ${app.name} down`),
     h(
       "footer",
       null,

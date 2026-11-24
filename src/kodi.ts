@@ -14,7 +14,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, builtinPacket, cleanFolders, cleanOffset, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture, type BrowserReport, type Screen } from "./tv";
+import { advancedXml, builtinPacket, cleanFolders, cleanOffset, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_BROWSER_UNIT, TV_USER, unitText, type Call, type Display, type Picture, type BrowserReport, type Screen } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -487,16 +487,33 @@ async function chooseAudioOnce(): Promise<void> {
   }
 }
 
-/** On: the player starts now and with the server. Off: it stops and the screen goes back to the console */
+/**
+ * Nobody has the screen any more: the console takes it, and is left showing only when the person chose
+ * it; otherwise the screen is put to sleep. Closing the player or the browser never leaves a terminal on the TV.
+ */
+export async function restScreen(): Promise<void> {
+  await run(["chvt", "1"], 10_000);
+  sleepScreen(!settings.tv.console);
+}
+
+/** The person chose who has the screen: the console's flag follows */
+export function chooseConsole(on: boolean): void {
+  if (settings.tv.console === on) return;
+  settings.tv.console = on;
+  saveSettings();
+}
+
+/** On: the player starts now and with the server. Off: it stops and the screen goes to sleep (or the console, when chosen) */
 export async function switchTv(on: boolean, by: string): Promise<TvReport> {
   if (!has("kodi")) throw new AppError("tv.notInstalled", 409);
   if (on) await setUp();
+  if (on) chooseConsole(false);
   if (on) sleepScreen(false);
   const done = await run(["systemctl", on ? "enable" : "disable", "--now", TV_UNIT], 60_000);
   if (done.code !== 0) throw new AppError("tv.switchFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
   if (on && (await awaitKodi())) await chooseAudioOnce();
   // the services themselves leave the console alone, so a change between the player and the browser shows no console in between
-  if (!on) await run(["chvt", "1"], 10_000);
+  if (!on) await restScreen();
   record(on ? "tv.on" : "tv.off", { user: by });
   bus.publish("tv");
   return tvReport();
@@ -831,6 +848,9 @@ function tell(next: TvNow | null): void {
 export function watchTv(): void {
   if (watching) return;
   watching = true;
+  // after the server starts nobody may have the screen (the player off): the system's login there is not
+  // what a TV should show, so it sleeps unless the console was chosen. Late enough for a player started with the server.
+  setTimeout(() => void darkAtStart(), 30_000);
   bus.subscribe((event) => {
     if (event.type === "bluetooth") followSpeaker();
   });
@@ -999,4 +1019,12 @@ export async function mediaSubs(raw: unknown, start: unknown, index: number, sig
   }
   if (from === null || !Number.isInteger(index) || index < 0 || index > 199) throw new AppError("tv.badSetting", 400);
   return piped(subsArgs(path, from, index), "text/vtt; charset=utf-8", signal);
+}
+
+/** The screen nobody has at the start of Hata is put to sleep, unless the person chose the console */
+async function darkAtStart(): Promise<void> {
+  if (settings.tv.console || tvEnabled()) return;
+  const states = (await run(["systemctl", "is-active", TV_UNIT, TV_BROWSER_UNIT], 15_000)).out.split("\n").map((line) => line.trim());
+  if (states.some((state) => state === "active" || state === "activating")) return;
+  sleepScreen(true);
 }

@@ -267,6 +267,24 @@ function openDialog(className, ...content) {
   document.body.append(dialog);
   frameDialog(dialog);
   dialog.showModal();
+  // the browser gives the focus to the first button there is — the cross — and draws its ring: a window starts
+  // on its first field instead (not on a touch screen, where that brings the keyboard up), else on itself
+  const settleFocus = () => {
+    if (document.activeElement?.classList?.contains("dlg-x") || document.activeElement?.closest?.(".dlg-head")) {
+      // the first field that is seen: one in a part hidden for now cannot take the focus
+      const field = !matchMedia("(pointer: coarse)").matches && [...dialog.querySelectorAll(".dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)")].find((x) => x.checkVisibility());
+      if (field) field.focus();
+      else {
+        dialog.tabIndex = -1;
+        dialog.focus({ preventScroll: true });
+        // a window that cannot take the focus itself leaves it nowhere rather than on the cross
+        if (document.activeElement?.closest?.(".dlg-head")) document.activeElement.blur();
+      }
+    }
+  };
+  settleFocus();
+  // a window filled right after it opens may move the focus once more
+  requestAnimationFrame(settleFocus);
   return dialog;
 }
 
@@ -297,7 +315,8 @@ function frameDialog(dialog) {
     const after = title?.tagName === "H2" ? kids[kids.indexOf(title) + 1] : null;
     const lead = after?.tagName === "P" && after.classList.contains("muted") && !after.classList.contains("error") ? after : null;
     const foot = kids.findLast((node) => node.tagName === "FOOTER");
-    const cross = title?.querySelector?.(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
+    // a window that draws its own head inside its body (the disk's) brings its own cross: never a second one
+    const cross = root.querySelector(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
     const head = h("div", { class: "dlg-head" }, h("div", { class: "dlg-title" }, title, lead), cross);
     body = h("div", { class: "dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
     root.replaceChildren(head, body, ...(foot ? [foot] : []));
@@ -386,8 +405,1140 @@ function uiCard({ title = null, count = null, marks = null, actions = null, lead
 }
 /** Facts in rows, a label on the left and its value on the right: `[label, value]` pairs, empty ones left out */
 const uiFacts = (rows) => rows.filter(Boolean).map(([label, value]) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value)));
+
+/*
+ * The blocks of the design system (its SYSTEM.md: 21 blocks, a closed set). A page is made of these, never of
+ * markup of its own: a head, cards, rows, settings, facts, tables, tiles, states, numbers, meters, notices,
+ * empties, commands, steps. Their look is the block "Blocks" at the end of app.css (classes `ui-…`). The sheet
+ * `#/blocks` shows every block in every form; `tests/blocks.test.ts` keeps pages from making their own.
+ */
+
+/** The rest of the actions: one "⋯" of the size given, opening a menu of `entries` (or of what `entries()` gives) */
+function uiMore(entries, { size = "m", header = null, label = t("app.more") } = {}) {
+  const b = h("button", { type: "button", class: `btn ui-more ${size === "s" ? "small square" : "square"}`, "aria-label": label, title: label }, icon("more"));
+  b.onclick = (e) => {
+    e.stopPropagation();
+    const list = typeof entries === "function" ? entries() : entries;
+    menuAt(b, typeof header === "function" ? header() : header, list);
+  };
+  return b;
+}
+
+/** A state: a pill with a dot, in one of five tones — ok, warn, bad, info, off */
+const uiState = (tone, text, attrs = {}) => h("span", { class: `ui-state ${tone}`, ...attrs }, text);
+/** A tag: a small grey label without a frame */
+const uiTag = (text) => h("span", { class: "ui-tag" }, text);
+/** The count of what needs attention, by a section's name or on a tile of the menu */
+const uiCount = (n) => (n > 0 ? h("b", { class: "ui-count" }, String(n)) : null);
+
+/**
+ * A meter: a bar of 4 px. `kind` — capacity (ok < 80, warn to 94, bad from 95), progress (the accent) or load
+ * (faint); `label` above it. `parts` instead of a value draws a bar of several colours.
+ */
+function uiMeter(value, { kind = "capacity", label = null, parts = null } = {}) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const tone = kind === "progress" ? "progress" : kind === "load" ? "load" : v >= 95 ? "bad" : v >= 80 ? "warn" : "ok";
+  const bar = parts
+    ? h("div", { class: "ui-meter multi" }, parts.map((p) => h("i", { class: "c-" + (p.colour ?? "1"), style: null, "data-w": p.value })))
+    : h("div", { class: `ui-meter ${tone}`, role: "meter", "aria-valuenow": Math.round(v), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i"));
+  if (parts) bar.querySelectorAll("i").forEach((i) => i.style.setProperty("width", i.dataset.w + "%"));
+  else bar.firstChild.style.setProperty("width", v + "%");
+  return label ? h("div", { class: "ui-meter-wrap" }, h("span", { class: "ui-meter-label" }, label), bar) : bar;
+}
+
+/** A meter of steps: what is done in the accent, the current one moving */
+function uiSteps(done, total, { running = true } = {}) {
+  return h("div", { class: "ui-steps", "aria-label": t("ui.stepOf", { n: Math.min(done + 1, total), of: total }) }, Array.from({ length: total }, (_, i) => h("i", { class: i < done ? "done" : i === done && running ? "now" : "" })));
+}
+
+/** A switch that acts at once: 36 × 20, on the right of what it switches */
+function uiSwitch({ on = false, label, onchange = null, disabled = false, busy = false } = {}) {
+  const b = h("button", { type: "button", class: "ui-switch" + (busy ? " busy" : ""), role: "switch", "aria-checked": String(on), "aria-label": label, disabled, "aria-busy": busy ? "true" : null }, h("i"));
+  b.onclick = async () => {
+    const next = b.getAttribute("aria-checked") !== "true";
+    b.setAttribute("aria-checked", String(next));
+    if (!onchange) return;
+    b.setAttribute("aria-busy", "true");
+    try {
+      await onchange(next);
+    } catch (e) {
+      b.setAttribute("aria-checked", String(!next));
+      toast(errorText(e), "error");
+    } finally {
+      b.removeAttribute("aria-busy");
+    }
+  };
+  return b;
+}
+
+/** A segment of up to four choices; more than four become a choice from a list */
+function uiSegment(items, value, onchange, { wide = false, label = null } = {}) {
+  if (items.length > 4) {
+    const sel = h("select", { "aria-label": label, onchange: () => onchange(sel.value) }, items.map((x) => h("option", { value: x.value, selected: x.value === value }, x.count != null ? `${x.label} · ${x.count}` : x.label)));
+    return sel;
+  }
+  return h(
+    "div",
+    { class: "ui-segment" + (wide ? " wide" : ""), role: "tablist", "aria-label": label },
+    items.map((x) =>
+      h(
+        x.href ? "a" : "button",
+        { type: x.href ? null : "button", href: x.href, class: "ui-seg" + (x.value === value ? " active" : ""), role: "tab", "aria-selected": String(x.value === value), disabled: x.off, title: x.why, onclick: x.href ? null : () => onchange?.(x.value) },
+        x.icon && icon(x.icon),
+        x.label,
+        x.count != null && h("span", { class: "ui-seg-count" }, String(x.count)),
+      ),
+    ),
+  );
+}
+
+/** A leading part of a row: an icon in a frame, an icon in a tone, a picture, a person, a tick, a colour */
+function uiLead(lead) {
+  if (!lead) return null;
+  if (lead instanceof Node) return lead;
+  if (lead.check) return lead.check;
+  if (lead.avatar) return lead.avatar;
+  if (lead.colour) return h("span", { class: "ui-lead colour" }, h("i", { class: "c-" + lead.colour }));
+  if (lead.img) return h("span", { class: "ui-lead thumb" }, lead.img);
+  if (lead.logo) return h("span", { class: "ui-lead" }, lead.logo);
+  return h("span", { class: "ui-lead" + (lead.tone ? " tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
+}
+
+/**
+ * A row: `[lead] — [name + sub] — [tail]`. Tail from the left: `value` (or `time`), `state`, one `action` (a small
+ * button), `more` (entries of "⋯"). `href` / `onclick` make the whole row a way somewhere (then a chevron, no "⋯").
+ * `mode` — "event" (time in mono on the right), "group" (a grey band), "task" (a meter under the text).
+ */
+function uiRow({ lead = null, name, sub = null, value = null, time = null, state = null, action = null, more = null, href = null, onclick = null, mode = "thing", meter = null, title = null, cls = "", menu = undefined, id = null } = {}) {
+  const goes = !!(href || onclick);
+  const text = h("div", { class: "ui-row-text" }, h("div", { class: "ui-row-name", title: title ?? (typeof name === "string" ? name : null) }, name), sub && h("div", { class: "ui-row-sub", title: typeof sub === "string" ? sub : null }, sub), action && time != null && h("div", { class: "ui-row-when mono" }, time), meter);
+  const tail = h(
+    "div",
+    { class: "ui-row-tail" },
+    value != null && h("span", { class: "ui-row-value" }, value),
+    time != null && h("span", { class: "ui-row-time mono" }, time),
+    state,
+    action,
+    more && uiMore(more, { size: "s" }),
+    goes && !more && !action && icon("chevron", "ui-row-go"),
+  );
+  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${action ? " acts" : ""}${action && (state || value != null) ? " full" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+}
+
+/** A group of rows: a grey band with a chevron, a name, a count and its own tail; rows under it */
+function uiGroup({ name, count = null, state = null, action = null, more = null, open = true, onToggle = null }, ...rows) {
+  const band = h(
+    "div",
+    { class: "ui-row group" + (open ? " open" : "") },
+    h("button", { type: "button", class: "ui-group-fold", "aria-expanded": String(open), onclick: () => onToggle?.(!open) }, icon("chevron"), h("span", null, name), count != null && h("span", { class: "ui-row-count" }, String(count))),
+    h("div", { class: "ui-row-tail" }, state, action, more && uiMore(more, { size: "s" })),
+  );
+  return h("div", { class: "ui-group" }, band, open && rows);
+}
+
+/** A setting: its name and what it does on the left, the control on the right (under it on a phone) */
+const uiSetting = ({ name, explain = null, control, wide = false, id = null }) =>
+  h("div", { class: "ui-setting" + (wide ? " wide" : ""), id }, h("div", { class: "ui-setting-text" }, h("div", { class: "ui-setting-name" }, name), explain && h("div", { class: "ui-setting-explain" }, explain)), h("div", { class: "ui-setting-control" }, control));
+
+/** Facts with a meter: an icon, a label, the meter (or a sparkline) and the value — one metric to a row */
+const uiMeterFacts = (rows) =>
+  rows.filter(Boolean).map((r) => h("div", { class: "ui-mfact" }, h("span", { class: "ui-mfact-label" }, r.icon && icon(r.icon), r.label), h("span", { class: "ui-mfact-bar" }, r.spark ?? uiMeter(r.value, { kind: r.kind ?? "load" })), h("span", { class: "ui-mfact-value mono" }, r.text)));
+
+/** A number of the strip: a label, the value with its unit, room for a meter, a hint — always the same height */
+const uiStat = ({ icon: iconName = null, label, value, unit = null, tone = null, meter = null, hint = null, href = null }) =>
+  h(href ? "a" : "div", { class: "ui-stat", href }, h("span", { class: "ui-stat-label" }, iconName && icon(iconName), label), h("span", { class: "ui-stat-value" }, h("strong", { class: tone }, value), unit && h("span", null, unit)), h("span", { class: "ui-stat-chart" }, meter), h("span", { class: "ui-stat-hint" }, hint ?? ""));
+
+/**
+ * A table: `columns` [{ label, num, sort }], `rows` [{ cells, sub, menu, onclick, href, group, whole, cls }] — `whole` is one cell across. The first cell is
+ * the name. On a phone (its own width under 640) each row becomes a row of the list: the name and its `sub`.
+ */
+function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
+  const head = h("thead", null, h("tr", null, columns.map((c) => h("th", { class: c.num ? "num" : null, "aria-sort": c.sorted ?? null }, c.sort ? h("button", { type: "button", class: "ui-th-sort", onclick: c.sort }, c.label, c.sorted && icon(c.sorted === "ascending" ? "up" : "down")) : c.label))));
+  const body = h(
+    "tbody",
+    null,
+    rows.map((r) =>
+      r.group != null
+        ? h("tr", { class: "ui-tr-group" }, h("td", { colspan: columns.length }, r.group))
+        : r.whole != null
+          ? h("tr", { class: "ui-tr-whole" + (r.cls ? " " + r.cls : "") }, h("td", { colspan: columns.length }, r.whole))
+        : h(
+            "tr",
+            { class: [r.onclick || r.href ? "goes" : "", r.cls ?? ""].join(" ").trim() || null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
+            r.cells.map((cell, i) => h("td", { class: columns[i]?.num ? "num" : null }, i === 0 && r.sub ? [cell, h("div", { class: "ui-td-sub" }, r.sub)] : cell)),
+          ),
+    ),
+  );
+  return h("div", { class: `ui-table-wrap h${height}${cls ? " " + cls : ""}` }, h("table", { class: "ui-table" }, head, body));
+}
+
+/** The name cell of a table: a lead (an icon in its frame, a tick), the name and a line under it */
+const uiCell = ({ lead = null, tick = null, name, sub = null }) =>
+  h("div", { class: "ui-cell" }, tick, uiLead(lead), h("div", { class: "ui-cell-text" }, h("div", { class: "ui-cell-name", title: typeof name === "string" ? name : null }, name), sub && h("div", { class: "ui-cell-sub" }, sub)));
+
+/**
+ * A tile: an icon, a name, a sub line and a state above; one line below — a value, a meter or a warning (which
+ * takes the value's place). `tone` warn / bad gives the frame of a thing that needs attention. `desc` makes the
+ * tile of 128 with two lines of description (the store, the modules). `kind` small / media / add.
+ */
+function uiTile({ icon: iconName = "box", logo = null, name, sub = null, state = null, foot = null, warn = null, tone = null, desc = null, href = null, onclick = null, more = null, kind = "", tail = null, menu = undefined, selected = false, id = null, picture = null } = {}) {
+  const head = h(
+    "div",
+    { class: "ui-tile-top" },
+    kind === "media" ? null : logo ? h("span", { class: "ui-tile-icon" }, logo) : h("span", { class: "ui-tile-icon" }, icon(iconName)),
+    h("div", { class: "ui-tile-names" }, h("div", { class: "ui-tile-name", title: typeof name === "string" ? name : null }, name), sub && h("div", { class: "ui-tile-sub", title: typeof sub === "string" ? sub : null }, sub)),
+    state,
+    tail,
+    more && uiMore(more, { size: "s" }),
+  );
+  const low = warn ? h("div", { class: `ui-tile-foot warn ${tone ?? "warn"}` }, icon("alert"), h("span", null, warn)) : foot && h("div", { class: "ui-tile-foot" }, foot);
+  const description = desc && h("div", { class: "ui-tile-desc" }, desc);
+  const media = kind === "media" && h("div", { class: "ui-tile-picture" }, picture ?? icon(iconName));
+  return h(
+    href ? "a" : onclick ? "button" : "div",
+    { class: `ui-tile${kind ? " " + kind : ""}${desc ? " described" : ""}${tone ? " " + tone : ""}${selected ? " selected" : ""}`, href, type: onclick && !href ? "button" : null, onclick, menu, id },
+    media,
+    head,
+    description,
+    low,
+  );
+}
+/** The tile that adds: a dashed frame with a plus */
+const uiAddTile = (label, onclick) => h("button", { type: "button", class: "ui-tile add", onclick }, icon("plus"), h("span", null, label));
+
+/** A notice: a box in a soft tone with an icon, a title, a text, an optional command and up to two buttons */
+const uiNotice = ({ tone = "info", icon: iconName = null, title = null, text = null, command = null, action = null, second = null, foot = null }) =>
+  h(
+    "div",
+    { class: `ui-notice ${tone}`, role: tone === "bad" ? "alert" : "status" },
+    icon(iconName ?? { info: "info", ok: "check", warn: "alert", bad: "alert" }[tone] ?? "info"),
+    h("div", { class: "ui-notice-text" }, title && h("strong", null, title), text && h("div", null, text), command, foot),
+    (action || second) && h("div", { class: "ui-notice-actions" }, second, action),
+  );
+
+/**
+ * "A program is needed": what it is, why, the exact command and the button — nothing is installed until it is
+ * pressed (the rule of Hata). `optional` softens it; `run` absent means it has to be installed by hand.
+ */
+function uiNeedProgram({ name, why, command, run = null, optional = false, busy = false, why2 = null }) {
+  const press = run && button(t(busy ? "ui.installing" : "ui.install"), { class: "primary small", disabled: busy, "aria-busy": busy ? "true" : null, onclick: run });
+  return uiNotice({ tone: "info", icon: "package", title: t(optional ? "ui.needOptional" : "ui.needProgram", { name }), text: why, command: command && uiCommand(command), action: press, foot: why2 });
+}
+
+/**
+ * An empty place: `big` (an icon, a title, a text, one button), `small` (a line, perhaps a quiet button),
+ * `loading` (the ring, in a room of three rows) or `error` (big, in the bad tone, with "Try again").
+ */
+function uiEmpty({ size = "small", icon: iconName = null, title = null, text = null, action = null, tone = null } = {}) {
+  if (size === "loading") return h("div", { class: "ui-empty loading", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }), text && h("span", null, text));
+  if (size === "small") return h("div", { class: "ui-empty small" + (tone ? " " + tone : "") }, iconName && icon(iconName), h("span", null, text ?? title), action);
+  return h("div", { class: "ui-empty big" + (size === "error" ? " bad" : "") }, h("span", { class: "ui-empty-icon" }, icon(iconName ?? (size === "error" ? "alert" : "box"))), title && h("strong", null, title), text && h("p", null, text), action);
+}
+
+/** A command, a key, an address to copy: one line (or a `block`), copied whole; a `secret` is dotted until shown */
+function uiCommand(text, { block = false, secret = false, label = null } = {}) {
+  let shown = !secret;
+  const words = h(block ? "pre" : "span", { class: "ui-command-text" }, shown ? text : "••••••••••••");
+  const copy = h("button", { type: "button", class: "icon-btn ui-command-copy", "aria-label": t("ui.copy"), title: t("ui.copy") }, icon("copy"));
+  copy.onclick = () => {
+    copyQuietly(text);
+    copy.replaceChildren(icon("check"));
+    toast(t("ui.copied"));
+    setTimeout(() => copy.replaceChildren(icon("copy")), 2000);
+  };
+  const eye = secret && h("button", { type: "button", class: "icon-btn ui-command-copy", "aria-label": t("ui.show"), title: t("ui.show") }, icon("eye"));
+  if (eye) eye.onclick = () => ((shown = !shown), (words.textContent = shown ? text : "••••••••••••"), eye.setAttribute("aria-label", t(shown ? "ui.hide" : "ui.show")));
+  return h("div", { class: "ui-command" + (block ? " block" : ""), "aria-label": label }, words, h("span", { class: "ui-command-tools" }, eye, copy));
+}
+
+/**
+ * A field of a form: the label above, the control, a hint under it. `group` — the control is several things (a
+ * pair of inputs, a list of ticks), so the field is not one `<label>`. `optional` says so beside the label.
+ */
+function uiField(label, control, hint = null, { group = false, optional = false, id = null, cls = "" } = {}) {
+  return h(group ? "div" : "label", { class: "ui-field" + (cls ? " " + cls : ""), id }, label != null && h("span", { class: "ui-field-label" }, label, optional && h("span", { class: "ui-field-opt" }, t("ui.optional"))), control, hint && h("span", { class: "ui-field-hint" }, hint));
+}
+/** Fields side by side (two to a line, one under another on a phone) */
+const uiFields = (...fields) => h("div", { class: "ui-fields" }, fields);
+/** A tick with its words (and a line under them): a choice in a form, not a switch that acts at once */
+function uiCheck(label, input, hint = null, { cls = "" } = {}) {
+  return h("label", { class: "ui-check" + (cls ? " " + cls : "") }, input, h("span", { class: "ui-check-text" }, h("span", null, label), hint && h("span", { class: "ui-check-hint" }, hint)));
+}
+/** Things in a line — buttons, states, a field and its button — wrapping when there is no room; `end` puts them right */
+const uiLine = (items, { end = false, cls = "" } = {}) => h("div", { class: "ui-line" + (end ? " end" : "") + (cls ? " " + cls : "") }, items);
+/** The foot of a card that is a form: its buttons on the right, under a line */
+const uiFoot = (...buttons) => h("footer", { class: "ui-foot" }, buttons);
+/** A second head inside a card: a smaller title, its line, things on its right */
+const uiSubhead = ({ title, lead = null, actions = null, count = null }) =>
+  h("div", { class: "ui-subhead" }, h("div", { class: "ui-subhead-main" }, h("h3", null, title, count != null && h("span", { class: "muted" }, " " + count)), actions && h("div", { class: "ui-line end" }, actions)), lead && h("p", { class: "muted small" }, lead));
+/** Text to read: paragraphs and lists as they come; `soft` puts it in a grey box (notes of an app, what to know) */
+const uiProse = (body, { title = null, soft = false } = {}) => h("div", { class: "ui-prose" + (soft ? " soft" : "") }, title && h("strong", null, title), body);
+/** A slider with its value beside it */
+function uiRange({ value = 0, min = 0, max = 100, step = 1, label = null, text = null, oninput = null, onchange = null, disabled = false } = {}) {
+  const shown = h("span", { class: "ui-range-value mono" }, text ? text(value) : String(value));
+  const input = h("input", { type: "range", min, max, step, value, disabled, "aria-label": label, oninput: (e) => ((shown.textContent = text ? text(Number(e.target.value)) : e.target.value), oninput?.(Number(e.target.value), e)), onchange: (e) => onchange?.(Number(e.target.value), e) });
+  return h("div", { class: "ui-range" }, input, shown);
+}
+
+
+// --- Blocks first made for home ---
+
+/** An icon of no picture: the room of one, for a menu entry that has none */
+function blankIcon() {
+  const empty = icon("box");
+  empty.replaceChildren();
+  return empty;
+}
+
+/** A dot of a state before words: running, stopped, partial, busy, restarting (or a tone of a description: ok, warn …) */
+const uiDot = (tone = "") => h("i", { class: "ui-dot" + (tone ? " ui-dot-" + tone : "") });
+/** A dot with its words */
+const uiDotWords = (tone, ...words) => h("span", { class: "ui-dot-words small" }, uiDot(tone), ...words);
+
+/** A picture of a thing that is not an app: an icon in the frame of an app's picture (`size` row, sm, lg, mini) */
+const uiGlyph = (iconName, size = "") => h("span", { class: "ui-app-icon ui-app-icon-plus" + (size ? " ui-app-icon-" + size : "") }, icon(iconName));
+
+/** A small mark beside a tile's picture: a lock, an arrow of an update, where a link leads */
+const uiTileMark = (iconName, title = null) => h("span", { class: "ui-home-tile-mark", title }, icon(iconName));
+
+/** The classes of a tile of Home: its kind (app, link, files, folder, builtin, ha, widget) and its states */
+const homeTileClass = (kind, states = "") => ["ui-home-tile", "ui-home-tile-kind-" + kind, ...String(states).split(/\s+/).filter(Boolean).map((s) => "ui-home-tile-" + s)].join(" ");
+/** The pressed part of a tile of Home: a link, or a button when `onclick` is given */
+const uiHomeTileMain = (attrs, ...content) => h(attrs.href ? "a" : "button", { type: attrs.href ? null : "button", draggable: attrs.href ? false : null, ...attrs, class: "ui-home-tile-main" + (attrs.class ? " " + attrs.class : "") }, ...content);
+/** The small button in a tile's corner: its menu, or a way to manage what it stands for */
+const uiHomeTileOpen = (attrs, iconName = "more") => h(attrs.href ? "a" : "button", { type: attrs.href ? null : "button", ...attrs, class: "ui-home-tile-open" }, icon(iconName));
+
+/** A search field with its magnifier, across what it searches */
+const uiSearchBox = (input) => h("label", { class: "ui-searchbox" }, icon("search"), input);
+
+/**
+ * A list of sections beside a page or in a window, by groups (`{ title, items }`, an item `{ label, icon, sub, active,
+ * run | href }`). On a phone only the open section shows: a tap on it unfolds the list, choosing one folds it again.
+ */
+function uiSideNav(groups, { cls = "" } = {}) {
+  const nav = h("nav", { class: "ui-sidenav ui-sidenav-fold" + (cls ? " " + cls : "") });
+  const item = (x) =>
+    h(
+      x.href ? "a" : "button",
+      { type: x.href ? null : "button", href: x.href, class: "ui-sidenav-item" + (x.active ? " ui-sidenav-item-active" : ""), onclick: x.run, "aria-current": x.active ? "true" : null },
+      h("span", { class: "with-icon" }, x.icon && icon(x.icon), h("span", { class: "clip" }, x.label)),
+      x.sub && h("span", { class: "muted small" }, x.sub),
+    );
+  nav.append(...groups.filter((g) => g.items.length).flatMap((g) => [g.title && h("div", { class: "ui-sidenav-title" }, g.title), ...g.items.map(item)].filter(Boolean)));
+  // folded on a phone: the open section unfolds the list; a choice, or a tap elsewhere, folds it
+  nav.addEventListener(
+    "click",
+    (e) => {
+      if (!phone.matches) return;
+      const picked = e.target.closest(".ui-sidenav-item");
+      if (nav.classList.contains("ui-sidenav-fold-open")) {
+        if (picked) nav.classList.remove("ui-sidenav-fold-open");
+      } else if (picked?.classList.contains("ui-sidenav-item-active")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        nav.classList.add("ui-sidenav-fold-open");
+      }
+    },
+    true,
+  );
+  if (!uiSideNav.watching) {
+    uiSideNav.watching = true;
+    document.addEventListener("click", (e) => {
+      for (const open of document.querySelectorAll(".ui-sidenav-fold-open")) if (!open.contains(e.target)) open.classList.remove("ui-sidenav-fold-open");
+    }, true);
+  }
+  return nav;
+}
+
+// --- Blocks first made for app ---
+
+/** The head of a block that is filled again and again (the blocks of Home): its title (with marks), things on its right */
+const uiBlockHead = ({ title, actions = null, pad = false }) => h("div", { class: "ui-block-head" + (pad ? " ui-block-head-pad" : "") }, h("h2", null, title), actions && uiLine(actions, { end: true }));
+
+/** A version becoming another: what, the old one, an arrow, the new one */
+const uiVersionChange = ({ name, from, to }) => h("div", { class: "ui-version" }, h("span", { class: "muted" }, name), h("span", { class: "mono" }, from), icon("arrow"), h("strong", { class: "mono" }, to));
+
+/** A console: a dark box of text that follows what a program prints; `page` makes it as tall as the page allows */
+const uiConsole = ({ page = false, small = false } = {}) => h("pre", { class: "ui-console" + (page ? " ui-console-page" : "") + (small ? " ui-console-small" : "") });
+/** A console with the command that fills it on top (and a choice beside it): a log, a terminal */
+const uiConsoleFrame = (command, body, aside = null) => h("div", { class: "ui-console-frame" }, h("div", { class: "ui-console-head" }, h("p", { class: "ui-console-cmd grow" }, icon("terminal"), command), aside), body);
+
+// --- Blocks first made for machines ---
+
+/** What a thing gives or cannot do, as a short list of lines */
+const uiGives = (lines) => h("ul", { class: "ui-gives stack-s small" }, lines.map((line) => h("li", null, line)));
+
+/** A part of a row whose clicks stay its own: the row around it is not pressed with it */
+const keepClick = (el) => (el.addEventListener("click", (e) => e.stopPropagation()), el);
+
+// --- Blocks first made for house ---
+
+/** Two columns: the main one and a side one of a third (the side goes on top under 900 px when `sideFirst`) */
+const uiColumns = (main, side, { sideFirst = false } = {}) => h("div", { class: "ui-columns" + (sideFirst ? " side-first" : "") }, h("div", { class: "stack" }, main), h("div", { class: "stack" }, side));
+
+/** A big reading of a thing's state, with what switches it beside it */
+const uiReadout = (text, tail = null) => h("div", { class: "ui-readout" }, h("p", { class: "ui-readout-value" }, text), tail);
+
+/** A value set by steps: a round "−", the value large with its label under it, a round "+" */
+const uiValueStepper = ({ value, label = null, disabled = false, less, more }) =>
+  h(
+    "div",
+    { class: "ui-value-stepper" },
+    button("−", { "aria-label": less.label, disabled, onclick: less.run }),
+    h("div", { class: "ui-value-stepper-value" }, h("strong", null, value), label && h("span", { class: "muted small" }, label)),
+    button("+", { "aria-label": more.label, disabled, onclick: more.run }),
+  );
+
+/** Buttons of equal width in a grid: the actions of one thing to choose from */
+const uiButtonGrid = (buttons) => h("div", { class: "ui-button-grid" }, buttons);
+
+/** A picture shown large on a dark ground; `whole` adds the button (and a double click) for the whole screen */
+function uiPictureFrame(picture, { whole = false } = {}) {
+  const frame = h("div", { class: "ui-frame" }, picture);
+  if (!whole) return frame;
+  const go = () => (document.fullscreenElement ? void document.exitFullscreen() : void frame.requestFullscreen?.().catch(() => {}));
+  frame.addEventListener("dblclick", go);
+  frame.append(h("button", { type: "button", class: "icon-btn ui-frame-whole", title: t("tv.fullScreen"), "aria-label": t("tv.fullScreen"), onclick: go }, icon("expand")));
+  return frame;
+}
+
+// --- Blocks first made for proxmox ---
+
+/**
+ * A line chart of points over time: thin lines, one shared y-axis from zero, a crosshair that snaps to the
+ * nearest point with every series in its readout. Series carry `colour` (1, 2; an older `cls` "s1" / "s2" reads the same) and `value`.
+ */
+function uiLineChart(points, series, { max = null, fmt, label, height = 150, head = true }) {
+  // the colour of a series: ui-c1, ui-c2
+  const key = (s) => "ui-c" + (s.colour ?? (Number(/(\d+)$/.exec(String(s.cls ?? ""))?.[1]) || 1));
+  const box = h("div", { class: "ui-chart" });
+  const tip = h("div", { class: "ui-chart-tip", hidden: true });
+  const draw = () => {
+    const W = Math.max(280, box.clientWidth || 600);
+    const H = height;
+    const L = 52, R = 10, T = 10, B = 22;
+    const values = points.flatMap((p) => series.map((s) => s.value(p))).filter((v) => v != null);
+    const top = max ?? niceTop(Math.max(0, ...values));
+    const t0 = points[0]?.t ?? 0;
+    const t1 = points.at(-1)?.t ?? 1;
+    const x = (t) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - Math.min(1, v / (top || 1))) * (H - T - B);
+    const el = (name, attrs, text) => {
+      const e = document.createElementNS(SVG_NS, name);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text != null) e.textContent = text;
+      return e;
+    };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": label });
+    for (const f of [0, 0.5, 1]) {
+      svg.append(el("line", { class: "ui-chart-grid", x1: L, x2: W - R, y1: y(top * f), y2: y(top * f) }));
+      svg.append(el("text", { class: "ui-chart-axis", x: L - 6, y: y(top * f) + 3, "text-anchor": "end" }, fmt(top * f)));
+    }
+    const span = t1 - t0;
+    for (let i = 0; i <= 3; i++) {
+      const t = t0 + (span * i) / 3;
+      const d = new Date(t);
+      svg.append(el("text", { class: "ui-chart-axis", x: x(t), y: H - 6, "text-anchor": i === 0 ? "start" : i === 3 ? "end" : "middle" }, span > 2 * 86400_000 ? d.toLocaleDateString(state.lang, { day: "numeric", month: "short" }) : d.toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" })));
+    }
+    for (const s of series) {
+      let d = "";
+      let pen = false;
+      for (const p of points) {
+        const v = s.value(p);
+        if (v == null) {
+          pen = false;
+          continue;
+        }
+        d += `${pen ? "L" : "M"}${x(p.t).toFixed(1)} ${y(v).toFixed(1)}`;
+        pen = true;
+      }
+      svg.append(el("path", { class: "ui-chart-line " + key(s), d }));
+    }
+    const cross = el("line", { class: "ui-chart-cross", y1: T, y2: H - B, visibility: "hidden" });
+    const dots = series.map((s) => el("circle", { class: "ui-chart-dot " + key(s), r: 4, visibility: "hidden" }));
+    svg.append(cross, ...dots);
+    const hit = el("rect", { class: "ui-chart-hit", x: L, y: 0, width: W - L - R, height: H });
+    svg.append(hit);
+    const show = (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W;
+      let best = 0;
+      for (let i = 1; i < points.length; i++) if (Math.abs(x(points[i].t) - px) < Math.abs(x(points[best].t) - px)) best = i;
+      const p = points[best];
+      if (!p) return;
+      cross.setAttribute("x1", x(p.t));
+      cross.setAttribute("x2", x(p.t));
+      cross.setAttribute("visibility", "visible");
+      series.forEach((s, i) => {
+        const v = s.value(p);
+        dots[i].setAttribute("visibility", v == null ? "hidden" : "visible");
+        if (v != null) (dots[i].setAttribute("cx", x(p.t)), dots[i].setAttribute("cy", y(v)));
+      });
+      put(tip, h("div", { class: "muted small" }, dateTime(p.t)), series.map((s) => h("div", { class: "small" }, h("i", { class: "ui-chart-key " + key(s) }), s.label, ": ", h("strong", null, s.value(p) == null ? "—" : (s.show ?? fmt)(s.value(p), p)))));
+      tip.hidden = false;
+      const left = (x(p.t) / W) * r.width;
+      tip.style.left = Math.min(Math.max(0, left + 12), r.width - tip.offsetWidth) + "px";
+    };
+    const hide = () => {
+      cross.setAttribute("visibility", "hidden");
+      dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+      tip.hidden = true;
+    };
+    hit.addEventListener("pointermove", show);
+    hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", hide);
+    box.replaceChildren(svg, tip);
+  };
+  // drawn at the width it has: the text of an SVG scaled down would shrink with it
+  let drawn = 0;
+  new ResizeObserver(() => {
+    if (box.isConnected && Math.abs(box.clientWidth - drawn) > 16) ((drawn = box.clientWidth), draw());
+  }).observe(box);
+  return h(
+    "div",
+    { class: "ui-chart-wrap" },
+    head && h("div", { class: "ui-chart-head" }, h("strong", null, label), series.length > 1 && h("span", { class: "ui-chart-legend" }, series.map((s) => h("span", { class: "small muted" }, h("i", { class: "ui-chart-key " + key(s) }), s.label)))),
+    points.some((p) => series.some((s) => s.value(p) != null)) ? box : uiEmpty({ text: t("pve.load.empty") }),
+  );
+}
+
+/** Tabs under a head: links to the parts of one thing, the current one marked */
+const uiTabs = (items, { label = null } = {}) => h("nav", { class: "ui-tabs", "aria-label": label }, items.filter(Boolean).map((x) => h("a", { class: "ui-tab" + (x.active ? " active" : ""), href: x.href, "aria-current": x.active ? "page" : null }, x.label, x.count != null && h("span", { class: "ui-tab-count" }, String(x.count)))));
+
+/** A screen of another system in the page: a terminal or a virtual machine's display, as tall as the window allows */
+const uiEmbed = (frame) => h("div", { class: "ui-embed" }, frame);
+
+// --- Blocks first made for files ---
+
+/**
+ * A page with a column of places on its left (Files, the trash, My Hata, the links): the column `sideId` is filled
+ * by whoever owns it, `main` is a column of cards. On a phone the column stands above, folded to its open place.
+ */
+function uiWithSide({ sideId = null, mainId = null, main = [] } = {}) {
+  return h("div", { class: "ui-with-side" }, h("aside", { class: "ui-with-side-side", id: sideId }), h("section", { class: "stack", id: mainId }, main));
+}
+
+/** A column of places or categories: titles and items; on a phone only the open one shows until it is tapped */
+function uiSide(items, { label = null, id = null } = {}) {
+  return h("nav", { class: "ui-side ui-side-fold", id, "aria-label": label }, items);
+}
+/** The small title over a group of a side column */
+const uiSideTitle = (text) => h("div", { class: "ui-side-title" }, text);
+/** One place of a side column: an icon, its name (and a quiet word after it), lit while it is open */
+function uiSideItem({ label, icon: iconName = null, href = null, onclick = null, active = false, muted = false, sub = null, title = null, menu = undefined, count = null } = {}) {
+  return h(
+    href ? "a" : "button",
+    { class: "ui-side-item" + (active ? " active" : "") + (muted ? " muted" : ""), href, type: href ? null : "button", onclick, title, menu },
+    h("span", { class: "with-icon" }, iconName && icon(iconName), h("span", { class: "clip" }, label, sub && h("span", { class: "muted" }, " · " + sub))),
+    count != null && h("span", { class: "muted small" }, String(count)),
+  );
+}
+// a folded side column opens when its open item is tapped; choosing one, or tapping elsewhere, folds it again
+document.addEventListener(
+  "click",
+  (e) => {
+    const fold = e.target.closest?.(".ui-side-fold");
+    for (const open of document.querySelectorAll(".ui-side-fold.ui-side-open")) if (open !== fold) open.classList.remove("ui-side-open");
+    if (!fold || !phone.matches) return;
+    const item = e.target.closest(".ui-side-item");
+    if (fold.classList.contains("ui-side-open")) {
+      if (item) fold.classList.remove("ui-side-open");
+    } else if (item?.classList.contains("active")) {
+      e.preventDefault();
+      e.stopPropagation();
+      fold.classList.add("ui-side-open");
+    }
+  },
+  true,
+);
+
+/** The bar on top of a page that is a tool rather than a thing (Files): a group of buttons and the address, then the tools */
+function uiToolbar({ group = null, main = null, tools = null } = {}) {
+  return h("section", { class: "ui-toolbar" }, h("div", { class: "ui-toolbar-main" }, group && h("div", { class: "ui-toolbar-group" }, group), main), tools && h("div", { class: "ui-toolbar-tools" }, tools));
+}
+
+/** A line of quiet facts in mono under a list: what is on the left, what on the right */
+const uiStatus = (left, right = null) => h("div", { class: "ui-status" }, h("span", null, left), right && h("span", null, right));
+
+/** The bar of what is chosen in a list: its count and what can be done to all of it; `sticky` keeps it in sight */
+const uiSelectBar = ({ id = null, sticky = false } = {}) => h("div", { class: "ui-select-bar" + (sticky ? " ui-select-sticky" : ""), id, hidden: true });
+
+/** A card that takes what is dropped on it: a dashed frame (a plain one where nothing can be dropped) */
+const uiDropZone = (body, { plain = false } = {}) => uiCard({ flush: true, cls: "ui-drop" + (plain ? " ui-drop-plain" : "") }, body);
+
+/** A chip to press that jumps somewhere, lit when one is there: the places a folder picker jumps to */
+const uiJump = ({ label, icon: iconName = null, active = false, onclick = null }) => h("button", { type: "button", class: "ui-jump" + (active ? " active" : ""), onclick }, iconName && icon(iconName), h("span", { class: "clip" }, label));
+
+/** A small sign after a name, in the accent: a favourite, a folder on Home, a shared one */
+const uiNameMark = (iconName, title) => h("span", { class: "ui-name-mark", title }, icon(iconName));
+
+/** How full a disk is: a thin meter and the words under it (the whole words on hover when `title` is given) */
+const uiRoom = (used, words, title = "") => h("span", { class: "ui-room", title }, uiMeter(used), h("span", { class: "muted small clip" }, words));
+
+/** A search field with its button glued to it */
+const uiFindBox = (input, { label, onclick }) => h("div", { class: "ui-findbox" }, input, h("button", { type: "button", class: "ui-findbox-go", title: label, "aria-label": label, onclick }, icon("search")));
+
+/** A field for code or a long text: mono, its lines kept */
+const uiCodeArea = ({ value = "", label = null, readOnly = false, disabled = false, page = false } = {}) => h("textarea", { class: "ui-codearea" + (page ? " ui-codearea-page" : ""), spellcheck: false, wrap: "off", value, readOnly, disabled, "aria-label": label });
+
+/** The list of the files of a folder: a card with a table, `head` its header cells, `rows` its rows (each with `data-name`) */
+const uiFilesList = (head, rows) => uiCard({ flush: true, cls: "ui-files-list" }, h("table", { class: "ui-files-table" }, h("thead", null, h("tr", null, head)), h("tbody", null, rows)));
+
+/** The picture of a file: its thumbnail, its first lines or its badge */
+const uiFileThumb = (content) => h("span", { class: "ui-file-thumb" }, content);
+/** A file without a picture: its extension (or icon) and what it is, on the colour of its kind */
+const uiFileBadge = (mark, kindWords, tint) => h("span", { class: "ui-file-badge ui-tint-" + tint }, mark, h("small", null, kindWords));
+/** A tile of a file or a folder: what opens it, the box to tick and its "⋯"; `data-name` is the file's */
+function uiFileTile({ name, dir = false, selected = false, cursor = false, open, tick, more }) {
+  return h("div", { class: "ui-file-tile" + (dir ? " ui-file-dir" : "") + (selected ? " ui-selected" : "") + (cursor ? " ui-cursor" : ""), "data-name": name }, open, h("span", { class: "ui-file-tick" }, tick), h("span", { class: "ui-file-more" }, more));
+}
+/** Tiles of files in groups (the folders, then the files); `choosing` shows every box to tick */
+const uiFileGrid = (groups, { choosing = false } = {}) => h("div", { class: "stack ui-file-tiles" + (choosing ? " ui-choosing" : "") }, groups.filter((g) => g.length > 0).map((g) => h("div", { class: "ui-file-grid" }, g)));
+
+// --- Blocks first made for settings ---
+
+/** Tiles in a grid: `kind` "described" — the tall tiles with two lines of description (the store), "small" */
+const uiTiles = (tiles, { kind = "" } = {}) => h("div", { class: "ui-tiles" + (kind ? " " + kind : "") }, tiles);
+
+/** A framed box inside a window or a card, holding a group of its own (the settings of an app being installed) */
+const uiBox = (...body) => h("div", { class: "ui-box" }, body);
+
+/**
+ * Pictures one at a time across the width: the stage, the arrows and the count. Its owner fills the stage and
+ * hides the arrows when there is one picture; the parts come back to be filled.
+ */
+function uiShots({ prev, next }) {
+  const stage = h("div", { class: "ui-shots-stage", tabindex: "0", "aria-roledescription": "carousel" });
+  const count = h("span", { class: "ui-shots-count" });
+  const back = h("button", { type: "button", class: "icon-btn ui-shots-prev", "aria-label": t("store.shotPrev"), onclick: prev }, icon("chevron", "flip"));
+  const on = h("button", { type: "button", class: "icon-btn ui-shots-next", "aria-label": t("store.shotNext"), onclick: next }, icon("chevron"));
+  return { view: h("div", { class: "ui-shots" }, stage, back, on, count), stage, count, prev: back, next: on };
+}
+
+/**
+ * A walk of steps (the first run), the whole page: Hata's mark and a `title` on top with things on the `right`, the
+ * steps on the left ({ name, hint, href, current, done }), then the `eyebrow` (step 2 of 7) and the `body`
+ */
+function uiWizard({ title, right = null, steps, eyebrow, body }) {
+  const step = (s, i) => {
+    const inner = [h("span", { class: "ui-wizard-num" }, s.done ? icon("check") : String(i + 1)), h("span", { class: "ui-wizard-words" }, h("strong", null, s.name), s.hint && h("span", { class: "muted small" }, s.hint))];
+    return h("li", { class: s.current ? "ui-wizard-now" : s.done ? "ui-wizard-done" : null }, s.href ? h("a", { href: s.href, "aria-current": s.current ? "step" : null }, inner) : h("span", null, inner));
+  };
+  return [
+    h("header", { class: "ui-wizard-top" }, h("span", { class: "ui-wizard-brand" }, logo(), "hata"), h("span", { class: "muted ui-wizard-title" }, title), h("div", { class: "ui-wizard-right" }, right)),
+    h("div", { class: "ui-wizard" }, h("ol", { class: "ui-wizard-steps" }, steps.map(step)), h("main", { class: "ui-wizard-main stack" }, h("p", { class: "ui-wizard-eyebrow" }, eyebrow), body)),
+  ];
+}
+/** The foot of a step of a walk: back on the left (or nothing), the next on the right, under a line */
+const uiWizardFoot = (back, next) => h("footer", { class: "ui-wizard-foot" }, back || h("span"), next);
+
+/**
+ * A choice that is a card of its own: the tick, an icon, the name, lines under it and what was `found` (in the
+ * info tone); the card is marked while ticked
+ */
+const uiOption = ({ input, icon: iconName = null, name, lines = [], found = [] }) =>
+  h("label", { class: "ui-option" }, input, iconName && icon(iconName), h("span", { class: "ui-option-text" }, h("strong", null, name), lines.filter(Boolean).map((l) => h("span", { class: "muted small" }, l)), found.map((f) => h("span", { class: "small ui-option-found" }, f))));
+
+// --- Blocks first made for tv ---
+// The blocks of a player and a remote, of a picture of a screen, of tiles of sites and of the cards of the
+// features one turns on. Their look is after "new blocks of part group A" in app.css.
+
+/**
+ * A key of a remote or a player: round, with an icon (or `text`, "OK"). `kind` main — the one loud key of the
+ * accent; skip — larger, with `text` ("30") under its icon; square — a square key of a row of keys. `on` — held
+ * down (mute, the whole screen); `turn` up / down / left — the chevron turned; `ok` — the key in the middle of a
+ * row; `push` — it stands at the right end of its row; `fourth` — the key a narrow row leaves out first.
+ */
+function uiKey({ icon: iconName = null, text = null, label, run = null, kind = "", on = false, disabled = false, hint = null, turn = "", ok = false, push = false, fourth = false } = {}) {
+  const base = kind === "main" ? "ui-key-main" : kind === "square" ? "ui-key-sq" : "ui-key";
+  const mods = [kind === "skip" && "ui-skip", on && "ui-on", turn && `ui-turn-${turn}`, ok && "ui-ok", push && "ui-push", fourth && "ui-fourth"].filter(Boolean).join(" ");
+  return h("button", { type: "button", class: `${base}${mods ? " " + mods : ""}`, title: hint ?? label, "aria-label": label, disabled, onclick: run }, iconName && icon(iconName), text != null && (kind === "skip" ? h("span", null, text) : text));
+}
+/** A key with its name under it; `square` — the square keys of the TV page's rows */
+const uiKeyCap = (key, label, { square = false } = {}) => h("div", { class: square ? "ui-keycap" : "ui-key-cap" }, key, h("span", { class: square ? null : "muted" }, label));
+/**
+ * Keys in a row. `kind`: transport — centred, the loud one in the middle; row — the music's; keys — spread out
+ * and wrapping; bar — a player's line with its volume; grid — square keys in columns
+ */
+const uiKeys = (keys, kind = "keys") => h("div", { class: { transport: "ui-transport", row: "ui-keys-row", keys: "ui-keys", bar: "ui-transport-bar", grid: "ui-keypad" }[kind] }, keys);
+/** A round pad of four arrows with OK in the middle: `press("up" | "down" | "left" | "right" | "select")` */
+function uiPad(press, { disabled = false, labels }) {
+  const arrow = (side) => h("button", { type: "button", class: `ui-pad-arrow ui-${side}`, title: labels[side], "aria-label": labels[side], disabled, onclick: () => press(side) }, icon("chevron"));
+  return h("div", { class: "ui-pad" }, arrow("up"), arrow("left"), h("button", { type: "button", class: "ui-pad-ok", disabled, onclick: () => press("select") }, "OK"), arrow("right"), arrow("down"));
+}
+/** The pad and a grid of square keys of a remote, side by side (under each other on a phone) */
+const uiControls = (pad, keys) => h("div", { class: pad ? "ui-controls ui-with-pad" : "ui-controls" }, pad, uiKeys(keys, "grid"));
+/** A slider of a player: a position or a volume; `vol` — the narrow volume of a row of keys */
+const uiSlider = ({ value = 0, min = 0, max = 100, step = 1, label, onchange = null, oninput = null, muted = false, disabled = false, title = null, vol = false } = {}) =>
+  h("input", { type: "range", class: ["ui-slider", vol && "ui-vol", muted && "muted"].filter(Boolean).join(" "), min, max, step, value, disabled, title, "aria-label": label, onchange, oninput });
+/** A volume: the mute key, the slider, the value */
+const uiVolume = (key, slider, value) => h("div", { class: "ui-volume" }, key, slider, value);
+/** The value of a volume, in the warning's colour while muted */
+const uiVolumeValue = (text, muted = false) => h("span", { class: muted ? "ui-volume-value muted" : "ui-volume-value" }, text);
+/** Where what plays has got to and how long it is, under a slider; `mid` stands between them */
+const uiTimes = (from, to, mid = null) => h("div", { class: "ui-times muted" }, h("span", null, from), mid, h("span", null, to));
+/** A slider with the times at its ends (the music's) */
+const uiSeek = (from, slider, to) => h("div", { class: "ui-seek" }, h("span", { class: "muted small mono" }, from), slider, h("span", { class: "muted small mono" }, to));
+/** A slider with the times under it */
+const uiSeekCol = (slider, times) => h("div", { class: "ui-seek-col" }, slider, times);
+/** What plays now: its name with its state and one key on the right, the file under it, then what is given after */
+const uiNow = ({ title, state = null, action = null, sub = null }, ...after) =>
+  h("div", { class: "ui-now" }, h("div", { class: "ui-now-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, title), state), action), sub && h("p", { class: "ui-now-sub muted" }, sub), after);
+/** A thin line between the parts of a remote */
+const uiRule = () => h("hr", { class: "ui-rule" });
+/** The body of a remote (a dropdown of the head) */
+const uiRemote = (...kids) => h("div", { class: "ui-remote" }, kids);
+/** The head of a dropdown: what it is on the left, a link to its page on the right */
+const uiDropHead = ({ icon: iconName, title, href, link, linkIcon = "chevron", onclick = null }) =>
+  h("div", { class: "ui-drop-head" }, h("span", { class: "with-icon muted" }, icon(iconName), title), h("a", { class: "link small with-icon", href, onclick }, link, icon(linkIcon)));
+/** A button of the head's bar that opens a dropdown (what plays on the TV, the music) */
+const uiBarKey = ({ icon: iconName, label, onclick }) => h("button", { type: "button", class: "ui-barkey", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick }, icon(iconName));
+/** The strip of what plays over a phone's bottom bar: a thin bar of where it is, its name (a press opens), keys after it */
+function uiStrip({ bar, icon: iconName, title, sub, label, onopen }) {
+  return [h("div", { class: "ui-strip-bar" }, bar), h("button", { type: "button", class: "ui-strip-open", "aria-label": label, "aria-haspopup": "dialog", onclick: onopen }, icon(iconName), h("span", { class: "grow" }, h("strong", { class: "clip" }, title), sub))];
+}
+/** The line under the name in a strip */
+const uiStripSub = () => h("span", { class: "ui-strip-sub muted" });
+/**
+ * Hata's own player around a `<video>`: the picture with the layer of subtitles over it, a note on top, and the
+ * bar of its keys (`panel`, filled by the player) under it; `clock` is the time shown in the bar
+ */
+function uiPlayerFrame(video) {
+  const words = h("div", { class: "ui-player-words", "aria-live": "off" });
+  const note = h("p", { class: "ui-player-note", hidden: true });
+  const clock = h("span", { class: "ui-player-clock" }, "0:00");
+  const panel = h("div", { class: "ui-player-bar" });
+  const el = h("div", { class: "ui-player" }, h("div", { class: "ui-player-view" }, video, words), note, panel);
+  return { el, note, clock, words, panel };
+}
+/** The dark stage of a viewer's window that a picture, a video or a player stands on */
+const uiViewerStage = (child) => h("div", { class: "ui-stage" }, child);
+/** Two columns: a narrow one on the left, the rest on the right (one under another on a narrow page) */
+const uiSplit = (left, right) => h("div", { class: "ui-split" }, left, right);
+/** A value between two buttons that step it (milliseconds, a number) */
+const uiStepValue = (text) => h("span", { class: "ui-step-value mono" }, text);
+/** A field and its button on one line, the field taking the room */
+const uiInputLine = (field, action) => h("div", { class: "ui-input-line" }, field, action);
+/** The live picture of a screen: a frame of the screen's shape; `uiShotGrow` is its button for this device's whole screen */
+const uiShot = (label) => h("div", { class: "ui-shot", role: "img", "aria-label": label });
+const uiShotGrow = (label, onclick) => h("button", { type: "button", class: "ui-shot-grow", title: label, "aria-label": label, onclick }, icon("expand"));
+/** A small square mark of a site or a thing: a letter on a colour, or an icon in the accent (`tone` accent) or on glass (plain) */
+function uiMark({ letter = null, icon: iconName = null, colour = null, tone = "" } = {}) {
+  const el = h("span", { class: tone ? `ui-mark ui-${tone}` : "ui-mark", "aria-hidden": "true" }, iconName ? icon(iconName) : letter);
+  if (colour) el.style.background = colour;
+  return el;
+}
+/** Tiles of sites, two or more to a line */
+const uiMarks = (...tiles) => h("div", { class: "ui-marks" }, tiles);
+/**
+ * A tile of a site: its mark, its name and address; a press does `run`, `more` ({ label, hint, run }) is its "⋯",
+ * `on` — the one on the screen now. With `tools` (buttons) the tile is being arranged and does nothing itself.
+ */
+function uiMarkTile({ mark, name, sub, mono = false, on = false, title = null, run = null, menu = undefined, more = null, tools = null }) {
+  const words = h("span", { class: "ui-mark-words" }, h("strong", { class: "clip" }, name), h("span", { class: mono ? "muted mono clip" : "muted clip" }, sub));
+  if (tools) return h("div", { class: "ui-mark-tile ui-editing" }, mark, words, h("span", { class: "ui-mark-tools" }, tools));
+  return h(
+    "div",
+    { class: on ? "ui-mark-tile ui-on" : "ui-mark-tile", menu },
+    h("button", { type: "button", class: "ui-mark-main", title, onclick: run }, mark, words),
+    more && h("button", { type: "button", class: "icon-btn ui-mark-more", title: more.hint, "aria-label": more.label, onclick: more.run }, icon("more")),
+  );
+}
+/** The tile among the sites' that adds one */
+const uiMarkAdd = (label, onclick) => h("button", { type: "button", class: "ui-mark-tile ui-add", onclick }, icon("plus"), h("span", null, label));
+/**
+ * The screen as a dark rectangle of its shape (in both themes: it is the screen). `mode` live — its picture
+ * fills it; pick — tiles of what to put there; switching — it is changing hands.
+ */
+const uiScreen = (mode, ...kids) => h("div", { class: mode ? `ui-screen ui-${mode}` : "ui-screen" }, kids);
+/** What a screen shows, in its middle: a mark, a title, a line under it, then what is given after */
+const uiScreenWords = ({ mark = null, title, sub = null, status = false }, ...more) =>
+  h("div", { class: "ui-screen-words", role: status ? "status" : null }, mark, h("strong", { class: "ui-screen-title" }, title), sub && h("span", { class: status ? "ui-screen-sub" : "ui-screen-sub clip" }, sub), more);
+/** A chip in a screen's corner: the time, or a button (`run`) */
+const uiScreenChip = (text, { icon: iconName = null, run = null } = {}) =>
+  run ? h("button", { type: "button", class: "ui-screen-chip", onclick: run }, iconName && icon(iconName), text) : h("span", { class: "ui-screen-chip" }, text);
+/** A button on a screen's glass */
+const uiScreenButton = ({ icon: iconName, label, hint = null, run }) => h("button", { type: "button", class: "ui-screen-btn", title: hint, onclick: run }, icon(iconName), label);
+/** Where what plays is, along a screen's lower edge (0–100); with `seek` ({ label, seek }) it is pulled to another place */
+function uiScreenBar(at, seek = null) {
+  const fill = h("b");
+  fill.style.width = `${at}%`;
+  if (!seek) return h("i", { class: "ui-screen-bar" }, fill);
+  const pull = h("input", { type: "range", min: 0, max: 100, step: 0.1, value: at, "aria-label": seek.label, onchange: (e) => seek.seek(Number(e.target.value)) });
+  pull.addEventListener("input", () => (fill.style.width = `${pull.value}%`));
+  return h("span", { class: "ui-screen-bar ui-seekable" }, fill, pull);
+}
+/** What to put on a screen nothing has: a line with an icon, then the tiles */
+const uiScreenPick = ({ icon: iconName, text }, tiles) => h("div", { class: "ui-screen-pick" }, h("p", { class: "with-icon" }, icon(iconName), text), h("div", { class: "ui-screen-tiles" }, tiles));
+/** A tile of what to put on a screen; `main` — the first choice, in the accent */
+const uiScreenTile = ({ main = false, mark, title, sub, run }) =>
+  h("button", { type: "button", class: main ? "ui-screen-tile ui-main" : "ui-screen-tile", onclick: (e) => (e.currentTarget.classList.add("ui-going"), run()) }, mark, h("span", { class: "ui-mark-words" }, h("strong", { class: "clip" }, title), h("span", { class: "ui-screen-tile-sub clip" }, sub)));
+/** A screen and, beside it, its zones (under it on a narrow page) */
+const uiScreenSplit = (screen, zones) => h("div", { class: "ui-screen-split" }, screen, zones);
+/** The zones beside a screen, in one order: where it comes from, its name, what plays, the keys at the bottom */
+const uiZones = (...kids) => h("div", { class: "ui-zones" }, kids);
+/** The first line of the zones: the source on the left, its states on the right */
+const uiZoneHead = (left, right) => h("div", { class: "ui-zone-head" }, left, right);
+/** The name of what is on a screen and the address or file under it */
+const uiZoneName = (title, sub) => h("div", { class: "ui-zone-name" }, h("h3", null, title), sub && h("p", { class: "muted", title: sub }, sub));
+/** A card of Home that holds a screen: the screen takes the room, `uiMediaSide` stands under it (or beside it in a wide low card) */
+const uiMediaCard = () => h("div", { class: "ui-media-card" });
+const uiMediaSide = ({ title, sub = null, foot = null }) => h("div", { class: "ui-media-side" }, h("strong", { class: "ui-media-title" }, title), sub && h("span", { class: "ui-media-sub muted mono clip" }, sub), foot);
+/** The keys under a screen in a card; `keys` — a row of the remote's own keys, centred */
+const uiMediaFoot = (items, { keys = false } = {}) => h("div", { class: keys ? "ui-media-foot ui-keys-foot" : "ui-media-foot" }, items);
+/** A quiet line in the keys' place */
+const uiMediaQuiet = (text) => h("span", { class: "ui-media-quiet clip" }, text);
+/** The turning mark of something under way, alone (a screen's middle) */
+const uiRing = () => h("span", { class: "ui-ring" });
+/** A step list of a long piece of work: each step with its mark (done, now, failed), its words and a line under them */
+const uiStepList = (items) => h("ol", { class: "ui-step-list" }, items);
+const uiStepItem = (text) => h("li", null, h("span", { class: "ui-step-mark" }), h("div", { class: "grow" }, h("span", null, text), h("small", { class: "muted" })));
+/** A soft band of the accent with an icon, a title and its words: what is always there */
+const uiBandNote = ({ icon: iconName, title, text }) => h("div", { class: "ui-band-note" }, icon(iconName), h("span", null, h("strong", null, title), h("br"), h("span", { class: "muted small" }, text)));
+/** A toast with one button that undoes what was just done; it goes by itself after `ms` */
+function uiToastWith(text, label, run, ms = 8000) {
+  const note = h("div", { class: "ui-toast" }, h("span", null, text), h("button", { type: "button", class: "ui-toast-action", onclick: () => (note.remove(), run()) }, label));
+  $toasts.append(note);
+  setTimeout(() => note.remove(), ms);
+  return note;
+}
+/** Feature cards (the modules) in a grid of their own */
+const uiFeatures = (cards) => h("div", { class: "ui-features" }, cards);
+/**
+ * The card of a feature one turns on: its icon and name with the state, the switch on the right, what it is;
+ * then what is given (chips of what uses it, a line), and its foot at the bottom
+ */
+const uiFeature = ({ icon: iconName, name, state, control, on, what }, ...body) =>
+  uiCard({ cls: on ? "ui-feature ui-on" : "ui-feature", title: h("span", { class: "with-icon" }, icon(iconName), name), marks: state, actions: control, lead: what }, ...body);
+/** A chip of a feature's card: what uses it (a link), what it is needed for, what was found here for it (`found`) */
+const uiFeatureChip = ({ href = null, icon: iconName, text, found = false }) => h(href ? "a" : "span", { class: found ? "ui-feature-chip ui-found" : "ui-feature-chip", href }, icon(iconName), text);
+/** The foot of a feature's card: what it adds (or added), and the way to it */
+const uiFeatureFoot = ({ icon: iconName, text, link = null }) => uiFoot(h("p", { class: "muted small with-icon grow" }, icon(iconName), h("span", null, text)), link);
+
+// --- Blocks first made for network ---
+
+/** A code to scan (the SVG of `qrSvg`), in the middle of its place; empty until the code is put in */
+const uiQr = (svg = null) => h("div", { class: "ui-qr" }, svg);
+
+/** Digits to read or to type, large; the first `typed` of them dimmed as they are typed */
+const uiDigits = (code, typed = 0) => h("div", { class: "ui-digits", "aria-label": code }, [...code].map((digit, i) => h("span", { class: i < typed ? "ui-digit typed" : "ui-digit" }, digit)));
+
+/** The strength of a signal: four bars, `level` (0–4) of them lit */
+const uiSignal = (level, title = "") => h("span", { class: `ui-signal ui-signal-${Math.max(0, Math.min(4, level))}`, title }, h("i"), h("i"), h("i"), h("i"));
+
+/**
+ * Colours to choose from: round swatches [{ colour, on, label, onclick }], and an `extra` control after them (a
+ * colour of one's own)
+ */
+const uiSwatches = (choices, extra = null) =>
+  h(
+    "div",
+    { class: "ui-swatches" },
+    choices.map((c) => {
+      const b = h("button", { type: "button", class: "ui-swatch" + (c.on ? " on" : ""), title: c.label, "aria-label": c.label, "aria-pressed": String(!!c.on), onclick: c.onclick });
+      b.style.background = c.colour;
+      return b;
+    }),
+    extra,
+  );
+
+/** Pictures to choose from, in a grid of tiles (uiPicture) */
+const uiPictures = (...pictures) => h("div", { class: "ui-pictures" }, pictures);
+
+/**
+ * A picture to choose: its `src` (none — a plain tile), a `label` on it, `on` when chosen; `remove` { label, run }
+ * puts a bin in its corner; `add` makes the dashed tile that adds one
+ */
+function uiPicture({ src = null, label, on = false, onclick = null, remove = null, add = false } = {}) {
+  const tile = h(
+    "button",
+    { type: "button", class: "ui-picture" + (on ? " on" : "") + (add ? " add" : ""), "aria-pressed": add ? null : String(on), onclick },
+    src && h("img", { src, alt: "", loading: "lazy" }),
+    h("span", null, add && icon("upload"), add && " ", label),
+  );
+  if (!remove) return tile;
+  return h("div", { class: "ui-picture-own" }, tile, h("button", { type: "button", class: "icon-btn ui-picture-remove", title: remove.label, "aria-label": remove.label, onclick: remove.run }, icon("trash")));
+}
+
+// --- Blocks first made for storage ---
+
+/** A plain list to read: paths, steps, names; `numbered` counts them, `mono` for paths (the default) */
+function uiList(items, { mono = true, numbered = false } = {}) {
+  return h(numbered ? "ol" : "ul", { class: "ui-list" + (mono ? " mono" : "") }, items.filter((x) => x != null && x !== false).map((x) => h("li", null, x)));
+}
+
+/** A way down a tree: each step a button (`onclick`) or the place one is in (the last); `mono` for names of files */
+function uiCrumbs(steps) {
+  const shown = steps.filter(Boolean);
+  return h(
+    "nav",
+    { class: "ui-crumbs", "aria-label": t("ui.crumbs") },
+    shown.map((s, i) => [i > 0 && icon("chevron", "ui-crumb-sep"), s.onclick && i < shown.length - 1 ? h("button", { type: "button", class: s.mono ? "mono" : null, onclick: s.onclick }, s.label) : h("span", { class: s.mono ? "mono" : null, "aria-current": i === shown.length - 1 ? "page" : null, onclick: s.onclick ?? null }, s.label)]),
+  );
+}
+
+/** A row of uiTable as it stands among the others: `under` — a part of the row above it, `gone` — of a thing that is no longer there */
+const uiTableRow = (row, { under = false, gone = false } = {}) => ({ ...row, cls: [row.cls, under && "ui-tr-under", gone && "ui-tr-gone"].filter(Boolean).join(" ") });
+
+/**
+ * Files and folders to walk and pick from: `items` [{ name, dir, note, size, at, tick, open, download: href, mono }].
+ * A folder opens by a press of its row; a tick and a download do not open it.
+ */
+function uiFileList(items) {
+  const stop = (el) => (el && el.addEventListener("click", (e) => e.stopPropagation()), el);
+  return uiTable(
+    [{ label: t("files.col.name") }, { label: t("files.col.size"), num: true }, { label: t("files.col.modified") }, { label: "" }],
+    items.map((x) => ({
+      onclick: x.dir && x.open ? x.open : null,
+      cells: [
+        uiCell({ tick: stop(x.tick), lead: { icon: x.dir ? "folder" : "file" }, name: h("span", { class: x.mono ? "mono" : null }, x.name), sub: x.note || null }),
+        x.dir || x.size == null ? "" : bytes(x.size),
+        h("span", { class: "muted small" }, x.at ? dateTime(x.at) : ""),
+        x.download ? stop(h("a", { class: "icon-btn", href: x.download, download: x.name, title: t("files.download"), "aria-label": `${t("files.download")}: ${x.name}` }, icon("download"))) : "",
+      ],
+      sub: [x.dir || x.size == null ? null : bytes(x.size), x.at ? dateTime(x.at) : null].filter(Boolean).join(" · ") || null,
+    })),
+    { height: 44 },
+  );
+}
+
+/** A strip of numbers (uiStat) in a card of its own */
+const uiStats = ({ id = null } = {}, ...stats) => uiCard({ flush: true, cls: "ui-stats", id }, ...stats);
+
+/** A row of a long form: the label on the left, the control on the right, a note under it (one column on a phone) */
+function uiFormRow(label, control, note = null, { group = false, id = null } = {}) {
+  return h(group ? "div" : "label", { class: "ui-form-row", id }, h("span", { class: "ui-form-label" }, label), h("span", { class: "ui-form-control" }, control, note && h("span", { class: "muted small" }, note)));
+}
+/** Rows of a long form (uiFormRow), one under another */
+const uiForm = (...rows) => h("div", { class: "ui-form" }, rows);
+
+/** Inputs side by side on one line: inputs share the room, choices and short ones take what they need; `tight` joins a field and its button */
+const uiInputs = (items, { tight = false } = {}) => h("span", { class: "ui-inputs" + (tight ? " tight" : "") }, items);
+
+/** A value the form shows but cannot change: in a dashed frame, cut to a line */
+const uiReadOnly = (text, title = null) => h("span", { class: "ui-readonly mono small", title }, text);
+
+/** Things to switch between that can also be taken out: [{ label, active, onclick, remove: { label, run } }], then `add` */
+function uiChips(items, add = null) {
+  return h(
+    "div",
+    { class: "ui-chips" },
+    items.map((x) => h("span", { class: "ui-chip" + (x.active ? " active" : "") }, h("button", { type: "button", class: "ui-chip-name", onclick: x.onclick }, x.label), x.remove && h("button", { type: "button", class: "ui-chip-x", title: x.remove.label, "aria-label": x.remove.label, onclick: x.remove.run }, icon("x")))),
+    add,
+  );
+}
+
+/** A text to edit as code (a compose file): monospaced, as long as the page when `page` */
+const uiCodeEditor = (attrs = {}, { page = false } = {}) => h("textarea", { spellcheck: false, ...attrs, class: "ui-code-editor" + (page ? " page" : "") });
+
+/** What a program prints: `console` dark (a running job), `said` light (what a check answered); `size` m / s / page */
+const uiLog = (text = "", { kind = "console", size = "m", hidden = false } = {}) => h("pre", { class: `ui-log ${kind} ${size}`, hidden }, text);
+
+/** Steps of a wizard: done ones ticked, the current one marked; `current` counts from 1, past the last — all done */
+function uiStepper(labels, current) {
+  return h("ol", { class: "ui-stepper" }, labels.map((label, i) => h("li", { class: i + 1 === current ? "now" : i + 1 < current ? "done" : "" }, h("span", { class: "ui-stepper-n" }, i + 1 < current ? icon("check") : String(i + 1)), label)));
+}
+
+/**
+ * A piece of work going on (the tray of jobs): its icon, title and line, small buttons on the right (`tools`), the
+ * bar, a detail, what is left to do (`extra`), the buttons under it. `row` — one of a list. The parts that change by
+ * themselves are found again by their classes: ui-work-sub, ui-work-detail, ui-work-short, ui-work-bar.
+ */
+function uiWork({ lead, title, sub = "", subMono = false, tools = null, bar = null, detail = true, why = false, extra = null, actions = null, row = false, status = "", stopped = false, id = null }) {
+  return h(
+    "div",
+    { class: `ui-work${row ? " row" : ""} ${status}${stopped ? " stopped" : ""}`, "data-job": id },
+    h("div", { class: "ui-work-head" }, lead, h("div", { class: "ui-work-words" }, h("strong", { class: "ui-work-title" }, title), h("span", { class: "ui-work-sub" + (subMono ? " mono" : "") }, sub)), tools),
+    bar,
+    detail && h("p", { class: "ui-work-detail" + (why ? " why" : "") }),
+    extra,
+    actions && h("div", { class: "ui-work-actions" }, actions),
+  );
+}
+/** The bar of a piece of work: `count` parts, painted by uiWorkSeg */
+const uiWorkBar = (count) => h("span", { class: "ui-work-bar" }, Array.from({ length: count }, () => h("span", { class: "ui-work-seg" }, h("i"))));
+/** A part of the bar: full, moving, frozen, known (its `pct`) or empty */
+function uiWorkSeg(one, kind, pct = null) {
+  one.className = "ui-work-seg " + kind;
+  one.firstChild.style.width = pct === null ? "" : pct + "%";
+  one.setAttribute("aria-hidden", "true");
+}
+/** A list of pieces of work: its head, the rows, and "N more" */
+const uiWorkList = (head, rows, more = null) => h("div", { class: "ui-work-list" }, h("div", { class: "ui-work-list-head" }, head), rows, more);
+/** The tray folded: one line that opens it again, with a thin bar */
+const uiWorkStrip = ({ lead, title, short = false, bar = null, onclick, label, id = null }) =>
+  h("button", { type: "button", class: "ui-work-strip", "data-job": id, "aria-label": label, onclick }, lead, h("span", { class: "ui-work-words" }, h("strong", { class: "ui-work-title" }, title), short && h("span", { class: "ui-work-short" })), icon("up"), bar && h("span", { class: "ui-work-thin" }, bar));
+
+// --- Blocks first made for people ---
+
+/**
+ * A control with words glued to it: a prefix or a suffix (`.domain`, `host:`), or a field and its button — all
+ * in one line, the field taking the room left; strings are shown as quiet mono words.
+ */
+const uiAffix = (...parts) => h("span", { class: "ui-affix" }, parts.flat().filter(Boolean).map((p) => (typeof p === "string" ? h("span", { class: "muted mono clip" }, p) : p)));
+/** Rows inside a padded card, among its other blocks: the card's padding is theirs, no line under the last */
+const uiRowsIn = (...rows) => h("div", { class: "ui-rows ui-rows-in" }, rows);
+/** The round button in the corner of every page; `dot` — the red dot shown when something waits for a word */
+const uiFab = ({ icon: iconName, label, onclick }) => h("button", { type: "button", class: "ui-fab", title: label, "aria-label": label, onclick }, icon(iconName), h("span", { class: "ui-fab-dot", hidden: true }));
+/** A window of a conversation over the page: its parts are filled by whoever owns it (`list`, `head`, `body`, `form`) */
+function uiChat({ label, wide = false, form }) {
+  const parts = { list: h("nav", { class: "ui-chat-list", "aria-label": label }), head: h("div", { class: "ui-chat-head" }), body: h("div", { class: "ui-chat-body" }) };
+  form.classList.add("ui-chat-form");
+  const el = h("aside", { class: "ui-chat" + (wide ? " wide" : ""), "aria-label": label }, parts.list, parts.head, parts.body, form);
+  return { el, ...parts, form };
+}
+/** What one side of a conversation said: `user` (the person, on the right) or `bot` */
+const uiMessage = (from, ...body) => h("div", { class: "ui-msg " + (from === "user" ? "user" : "bot") }, body);
+/** A block of code or of a program's output */
+const uiCode = (text) => h("pre", { class: "ui-code" }, text);
+/** A line that opens to what is behind it */
+const uiDetails = (summary, ...body) => h("details", { class: "ui-details" }, h("summary", null, summary), body);
+/** A column of places to go to: `{ name, sub, current, dot, onclick }` */
+const uiNavList = (items) =>
+  h(
+    "div",
+    { class: "ui-navlist" },
+    items.map((x) => h("button", { type: "button", class: "ui-navitem", "aria-current": x.current ? "true" : null, onclick: x.onclick }, h("span", { class: "ui-navitem-name" }, x.name), h("span", { class: "ui-navitem-sub" }, x.dot && h("span", { class: "ui-dot" }), x.sub))),
+  );
+/** A page of one thing to read and answer (a sign-in asking for a word): a column no wider than 620, in the middle */
+const uiNarrow = (...body) => h("div", { class: "ui-narrow" }, body);
+/** A search field whose findings fall open under it: `results` is filled by the page (with uiFindHit), hidden while empty */
+const uiFind = (input, results) => h("div", { class: "ui-find" }, icon("search"), input, results);
+const uiFindResults = () => h("div", { class: "ui-find-results", hidden: true });
+/** One finding: an icon, its words, a note on the right; `under` — a part of the finding above it, indented */
+const uiFindHit = ({ icon: iconName = null, name, note = null, under = false, onpick }) =>
+  h("button", { type: "button", class: "ui-find-hit" + (under ? " ui-find-under" : ""), onmousedown: onpick }, iconName && icon(iconName), h("span", { class: "grow" }, name), note && h("span", { class: "muted small" }, note));
+/**
+ * A matrix: things down, people (or anything else) across, a mark in each cell. `columns` [{ name, sub }];
+ * `rows` [{ group, lead } | { thing, cells }] — a group is a grey band across, `thing` the first cell (a uiCell).
+ */
+const uiMatrix = (columns, rows) =>
+  h(
+    "div",
+    { class: "ui-matrix" },
+    h(
+      "table",
+      null,
+      h("thead", null, h("tr", null, h("th"), columns.map((c) => h("th", null, c.name, c.sub && h("span", { class: "muted" }, c.sub))))),
+      h(
+        "tbody",
+        null,
+        rows.map((r) => (r.group != null ? h("tr", { class: "ui-matrix-group" }, h("td", { colSpan: columns.length + 1 }, h("strong", null, r.group), r.lead && h("span", { class: "muted small" }, " · ", r.lead))) : h("tr", null, h("td", null, r.thing), r.cells.map((c) => h("td", null, c))))),
+      ),
+    ),
+  );
+/** A grant of a matrix: `on` (given), `reads` (read only), `off` (not), `fixed` (always, cannot be changed); a button when it has `onclick` */
+const uiGrant = ({ state = "off", label, text = null, onclick = null }) =>
+  h(onclick ? "button" : "span", { type: onclick ? "button" : null, class: "ui-grant" + (state === "off" ? "" : " " + state), "aria-pressed": onclick && state !== "reads" ? String(state === "on") : null, "aria-label": label, title: label, onclick }, text ?? (state === "on" || state === "fixed" ? icon("check") : "—"));
+
+/**
+ * The head of a page: crumbs, the thing's icon, the title with its state, the facts under it (joined by " · "), on
+ * the right up to two buttons (`actions`: { label, icon, run | href, primary }) and a "⋯" of `more` (or a `search`),
+ * the tabs under all. On a phone the main button stands under the title across; the other one goes into the "⋯".
+ */
+function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = null, state = null, facts = null, factsId = null, actions = [], actionsId = null, more = null, search = null, tabs = null, id = null, cls = "", menu = undefined } = {}) {
+  const trail = crumbs && h("nav", { class: "ui-crumbs", "aria-label": t("ui.crumbs") }, crumbs.map((c, i) => [i > 0 && icon("chevron", "ui-crumb-sep"), c.href && i < crumbs.length - 1 ? h("a", { href: c.href }, c.label) : h("span", { "aria-current": i === crumbs.length - 1 ? "page" : null }, c.label)]));
+  const shown = (facts ?? []).filter(Boolean);
+  const line = (shown.length > 0 || factsId) && h("div", { class: "ui-head-facts", id: factsId }, shown.flatMap((f, i) => (i ? [h("span", { class: "ui-dot-sep" }, " · "), f] : [f])));
+  // an action is a spec ({ label, icon, run | href, primary, danger }) or a node of the page's own (a link, a menu button)
+  const all = (actions ?? []).filter(Boolean);
+  const nodes = all.filter((a) => a instanceof Node);
+  const list = all.filter((a) => !(a instanceof Node)).slice(0, 2);
+  const main = list.find((a) => a.primary) ?? list[0];
+  const make = (a) => (a.href ? h("a", { class: "btn ui-spec" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: "ui-spec " + (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
+  const phone = () => matchMedia("(max-width: 640px)").matches;
+  const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href, danger: a.danger })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
+  const hasMore = !!more || list.length > 1;
+  const right = (list.length || nodes.length || hasMore || search || actionsId) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more"), id: actionsId }, search, nodes, list.map(make), hasMore && uiMore(entries));
+  return h(
+    "section",
+    { class: "card ui-head" + (cls ? " " + cls : ""), id },
+    trail,
+    (title != null || line || right) && h("div", { class: "ui-head-main", menu }, (iconName || logo) && h("span", { class: "ui-tile-icon" }, logo ?? icon(iconName)), h("div", { class: "ui-head-names" }, title != null && h("div", { class: "ui-head-title" }, h("h1", null, title), state), line), right),
+    tabs,
+  );
+}
+
+/** The sheet of the blocks (`#/blocks`): every block in its forms, with made-up words, as the drawings have them */
+function renderBlocks() {
+  const say = (x) => () => toast(x);
+  const items = [{ label: "Open", icon: "external", run: say("open") }, { label: "Restart", icon: "refresh", run: say("restart") }, { label: "Remove…", icon: "trash", danger: true, run: say("remove") }];
+  const sec = (title, ...body) => uiCard({ title }, ...body);
+  shell(
+    pageHead({ crumbs: [{ label: "Integrations", href: "#/house" }, { label: "qBittorrent" }], icon: "download", title: "qBittorrent", state: uiState("ok", "Online"), facts: [h("span", { class: "mono" }, "192.168.1.128:8181"), "↓ 2.1 MB/s", "active 3"], actions: [{ label: "Open", icon: "external", href: "#/blocks" }, { label: "Add torrents…", icon: "plus", primary: true, run: say("add") }], more: items }),
+    sec(
+      "States, tags, counts",
+      h("div", { class: "ui-line" }, uiState("ok", "Running"), uiState("warn", "May update"), uiState("bad", "Failed"), uiState("info", "In use"), uiState("off", "Stopped"), uiTag("+2"), uiCount(3)),
+    ),
+    sec(
+      "Buttons",
+      h("div", { class: "ui-line" }, button("Save", { class: "primary" }), button("Open"), button("Show 23 more", { class: "quiet" }), button("Delete", { class: "danger" }), button("Disabled", { disabled: true }), uiMore(items), button("Small", { class: "small" }), uiMore(items, { size: "s" })),
+    ),
+    sec(
+      "Switches and segments",
+      h("div", { class: "ui-line" }, uiSwitch({ on: true, label: "On" }), uiSwitch({ on: false, label: "Off" }), uiSwitch({ on: true, label: "Disabled", disabled: true }), uiSegment([{ value: "all", label: "All", count: 12 }, { value: "run", label: "Running", count: 9 }, { value: "off", label: "Stopped", count: 3 }], "all", say("seg"))),
+      uiSegment([{ value: "a", label: "Container" }, { value: "b", label: "Virtual machine" }], "a", say("seg"), { wide: true }),
+    ),
+    sec(
+      "Meters and steps",
+      uiMeter(42, { label: "Capacity 42 %" }),
+      uiMeter(86, { label: "Capacity 86 %" }),
+      uiMeter(97, { label: "Capacity 97 %" }),
+      uiMeter(60, { kind: "progress", label: "Progress" }),
+      uiMeter(30, { kind: "load", label: "Load" }),
+      uiMeter(0, { parts: [{ value: 40, colour: 1 }, { value: 20, colour: 2 }, { value: 10, colour: 3 }] }),
+      uiSteps(2, 5),
+    ),
+    h("section", { class: "card ui-stats" }, uiStat({ icon: "cpu", label: "Processor", value: "12", unit: "%", meter: uiMeter(12, { kind: "load" }), hint: "2 cores" }), uiStat({ icon: "memory", label: "Memory", value: "3.1", unit: "GB", meter: uiMeter(41, { kind: "load" }), hint: "of 7.6 GB" }), uiStat({ icon: "disk", label: "Disk", value: "81", unit: "%", tone: "warn", meter: uiMeter(81), hint: "5.4 GB free" }), uiStat({ icon: "temp", label: "Temperature", value: "42", unit: "°C" })),
+    uiCard(
+      { title: "Rows", count: 4, flush: true, actions: button("Add…", { class: "small" }, "plus") },
+      uiRow({ lead: { icon: "app" }, name: "Adminer", sub: "adminer:latest · 8080", state: uiState("ok", "Running"), action: button("Open", { class: "small" }), more: items }),
+      uiRow({ lead: { icon: "alert", tone: "warn" }, name: "Security updates for this server: 8", sub: "There are security fixes for system packages", action: button("Look", { class: "small primary" }), more: items }),
+      uiRow({ lead: { icon: "signin" }, name: "tester: signed in", sub: "192.168.1.196", time: "20:41", mode: "event" }),
+      uiRow({ lead: { icon: "folder" }, name: "A whole row is a way somewhere", sub: "with a chevron and nothing else", href: "#/blocks" }),
+      uiGroup({ name: "i5 — Proxmox", count: 3, state: uiState("ok", "Online"), more: items }, uiRow({ lead: { icon: "server" }, name: "Gitea", sub: "CT 212 · 192.168.1.212", state: uiState("ok", "Running"), more: items })),
+      uiRow({ lead: { icon: "download", tone: "info" }, name: "Installing Immich", sub: "Pulling images · step 2 of 3", meter: uiSteps(1, 3), mode: "task", action: button("Log", { class: "small" }) }),
+    ),
+    uiCard(
+      { title: "Settings" },
+      uiSetting({ name: "Install new versions by itself", explain: "Once a day at the time below. A version you went back from is skipped.", control: uiSwitch({ on: true, label: "Install by itself" }) }),
+      uiSetting({ name: "Time", explain: "Local time of the server.", control: h("input", { type: "time", class: "short", value: "05:00" }) }),
+      uiSetting({ name: "Versions offered", explain: "Betas come before a release.", control: h("select", null, h("option", null, "Stable"), h("option", null, "Beta")) }),
+    ),
+    uiCard({ title: "Facts" }, ...uiFacts([["Version", h("span", { class: "mono" }, "0.34.0")], ["Address", h("span", { class: "mono" }, "192.168.1.128")], ["State", uiState("ok", "Healthy")]])),
+    uiCard({ title: "This server" }, ...uiMeterFacts([{ icon: "cpu", label: "Processor", value: 12, text: "12 %" }, { icon: "memory", label: "Memory", value: 41, text: "3.1 GB" }, { icon: "disk", label: "Disk", value: 81, kind: "capacity", text: "81 %" }, { icon: "temp", label: "Temperature", value: 42, text: "42 °C" }])),
+    uiCard(
+      { title: "Table", flush: true },
+      uiTable(
+        [{ label: "Name" }, { label: "Image" }, { label: "Size", num: true }, { label: "" }],
+        [
+          { group: "This server" },
+          { cells: [h("strong", null, "Home Assistant"), h("span", { class: "mono" }, "ghcr.io/home-…:2026.11"), "1.6 GB", uiMore(items, { size: "s" })], sub: "1.6 GB · running", href: "#/blocks" },
+          { cells: [h("strong", null, "Adminer"), h("span", { class: "mono" }, "adminer:latest"), "118 MB", uiMore(items, { size: "s" })], sub: "118 MB · running" },
+        ],
+      ),
+    ),
+    uiCard(
+      { title: "Tiles" },
+      h("div", { class: "ui-tiles" }, uiTile({ icon: "download", name: "qBittorrent", sub: "192.168.1.128:8181", state: uiState("ok", "Online"), foot: "↓ 2.1 MB/s · ↑ 340 KB/s", href: "#/blocks" }), uiTile({ icon: "camera", name: "Frigate", sub: "192.168.1.240:8971", state: uiState("bad", "Silent"), warn: "Not answering for 7 min", tone: "bad", href: "#/blocks" }), uiTile({ icon: "disk", name: "Data · 500", sub: "ext4 · /mnt/500", foot: uiMeter(86), tone: null, href: "#/blocks" }), uiAddTile("Connect…", say("add"))),
+      h("div", { class: "ui-tiles described" }, uiTile({ icon: "app", name: "Uptime Kuma", sub: "Monitoring", state: uiState("ok", "Installed"), desc: "A self-hosted monitoring tool: watch sites, ports and services and be told when they go down.", href: "#/blocks" }), uiTile({ icon: "modules", name: "Network folders", sub: "Sharing", tail: uiSwitch({ on: true, label: "Network folders" }), desc: "Folders of this server for Windows, macOS and phones over SMB, with the users of Hata." })),
+      h("div", { class: "ui-tiles small" }, uiTile({ kind: "small", icon: "globe", name: "UAKino", sub: "uakino.best", more: items }), uiTile({ kind: "small", icon: "globe", name: "YouTube", sub: "youtube.com", more: items, selected: true })),
+      h("div", { class: "ui-tiles" }, uiTile({ kind: "media", icon: "camera", name: "outdoor", sub: "5.1 fps", href: "#/blocks" })),
+    ),
+    uiCard(
+      { title: "Notices" },
+      uiNotice({ tone: "info", title: "Kept until you change it", text: "What is said here is a state that lasts." }),
+      uiNotice({ tone: "warn", title: "Little room left", text: "The disk is 86 % full.", action: button("Look", { class: "small" }) }),
+      uiNotice({ tone: "bad", title: "Could not reach the server", text: "connect ECONNREFUSED 192.168.1.240:8971" }),
+      uiNeedProgram({ name: "smartmontools", why: "Reads the health of the disks (SMART) and runs their self-tests.", command: "apt-get install -y smartmontools", run: say("install") }),
+    ),
+    uiCard({ title: "Empty places" }, uiEmpty({ size: "big", icon: "download", title: "Nothing connected yet", text: "Connect a service and its state will be here.", action: button("Connect…", { class: "primary" }) }), uiEmpty({ text: "The queue is empty" }), uiEmpty({ icon: "check", tone: "ok", text: "All good" }), uiEmpty({ text: "46 more", action: button("Show", { class: "small quiet" }) }), uiEmpty({ size: "loading", text: "Loading" }), uiEmpty({ size: "error", title: "Could not load", text: "The server did not answer.", action: button("Try again") })),
+    uiCard({ title: "Commands" }, uiCommand("curl -fsSL http://192.168.1.128/client/abc123 | sudo sh"), uiCommand("hata_9f2c4e1b7a0d", { secret: true }), uiCommand("[Interface]\nPrivateKey = …\nAddress = 10.77.0.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = example.org:51820\nAllowedIPs = 10.77.0.1/32", { block: true })),
+  );
+}
+
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
-const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
+const closeX = (dialog) => h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
 // --- The look: colours and the background picture chosen in the settings -------------------------
 
@@ -483,6 +1634,8 @@ function parseRoute() {
   if (parts[0] === "links" && mayLink()) return { view: "links" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
+  // the sheet of the design system's blocks, every one in every form: to compare with the drawings
+  if (parts[0] === "blocks" && isAdmin()) return { view: "blocks" };
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
   // Bluetooth lived among this server's tabs at first
   if (parts[0] === "machines" && parts[1] === "this" && parts[2] === "bluetooth" && isAdmin()) return areaRoute("house", "bluetooth");
@@ -546,8 +1699,7 @@ function parseRoute() {
 const AREAS = {
   apps: [
     { id: "installed", hash: "#/apps", view: "apps" },
-    // the store is a button in the head of the section, as in Integrations, not a tab among its tabs
-    { id: "store", hash: "#/store", view: "store", head: true },
+    { id: "store", hash: "#/store", view: "store" },
     { id: "import", hash: "#/import", view: "import", admin: true },
     { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
   ],
@@ -566,6 +1718,7 @@ const AREAS = {
     { id: "offsite", view: "backups", admin: true, module: "offsite" },
   ],
   house: [
+    { id: "overview", hash: "#/house", view: "house" },
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
     { id: "music", hash: "#/house/music", view: "music", module: "music" },
@@ -640,7 +1793,7 @@ function areaOf(route = state.route) {
   if (["files", "trash", "myhata", "links"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
   if (view === "service") return route.house || !serviceApp(route.id) ? "house" : "apps";
-  if (["integrations", "ha", "tv", "music"].includes(view)) return "house";
+  if (["house", "integrations", "ha", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -867,9 +2020,8 @@ function waitMark() {
   return h("p", { class: "waiting", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }));
 }
 
-function field(label, input, hint) {
-  return h("label", { class: "field" }, h("span", { class: "label" }, label), input, hint && h("span", { class: "hint" }, hint));
-}
+/** The old name of a field of a form */
+const field = (label, input, hint) => uiField(label, input, hint);
 
 async function inviteScreen(token) {
   let invite = null;
@@ -1209,7 +2361,7 @@ function paintAttentionHere() {
   const view = document.getElementById("view");
   if (!view || !state.user) return;
   const area = navCurrent();
-  const head = view.querySelector(".area-head");
+  const head = view.querySelector(".ui-area-head");
   // the top pages of a section: those with its head, and the lists of Computers and Apps
   const top = head || ["machines", "apps"].includes(state.route.view);
   const list = isAdmin() && area && area !== "home" && top ? (state.overview?.attention ?? []).filter((item) => attentionArea(item) === area) : [];
@@ -1218,7 +2370,7 @@ function paintAttentionHere() {
   const sig = area + JSON.stringify(list.map((item) => [item.id, item.code, item.severity, item.at, item.detail]));
   if (was && was.isConnected && sig === attentionHere.sig) return;
   attentionHere.sig = sig;
-  const card = h("section", { class: "card pad stack area-attention", id: "area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, list.length))), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  const card = uiCard({ title: t("attention.title"), marks: uiCount(list.length), flush: true, id: "area-attention", cls: "area-attention" }, h("div", { class: "ui-rows attention-list" }, list.map((item) => attentionItem(item))));
   if (was) return void was.replaceWith(card);
   if (head) head.after(card);
   else view.prepend(card);
@@ -1463,6 +2615,7 @@ function render() {
   if (view === "links") return renderLinks();
   if (view === "myhata") return renderMyHata();
   if (view === "activity") return renderActivity();
+  if (view === "blocks") return renderBlocks();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
@@ -1475,6 +2628,7 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
+  if (view === "house") return renderHouse();
   if (view === "service") return renderService();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();

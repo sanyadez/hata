@@ -36,7 +36,7 @@ function copyText(text) {
   try {
     void navigator.clipboard.writeText(text);
   } catch {
-    const area = h("textarea", { class: "offscreen", value: text, readOnly: true });
+    const area = h("textarea", { class: "sr-only", value: text, readOnly: true });
     document.body.append(area);
     area.select();
     document.execCommand("copy");
@@ -49,7 +49,7 @@ function copyQuietly(text) {
   try {
     void navigator.clipboard.writeText(text);
   } catch {
-    const area = h("textarea", { class: "offscreen", value: text, readOnly: true });
+    const area = h("textarea", { class: "sr-only", value: text, readOnly: true });
     document.body.append(area);
     area.select();
     document.execCommand("copy");
@@ -173,19 +173,19 @@ async function loadFiles() {
 function renderFiles() {
   // whether a Proxmox server is there to send a disc to, from a file's menu
   if (isAdmin() && hasModule("proxmox") && !pveUi.list) void api("GET", "/api/proxmox").then((list) => (pveUi.list ??= list), () => {});
-  const box = h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
+  const box = uiWithSide({ sideId: "files-places", mainId: "files-main" });
   box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
   let depth = 0;
   const dragging = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
-  box.addEventListener("dragenter", (e) => dragging(e) && (e.preventDefault(), depth++, box.classList.add("dropping")));
+  box.addEventListener("dragenter", (e) => dragging(e) && (e.preventDefault(), depth++, box.classList.add("ui-dropping")));
   box.addEventListener("dragover", (e) => dragging(e) && e.preventDefault());
-  box.addEventListener("dragleave", (e) => dragging(e) && --depth <= 0 && ((depth = 0), box.classList.remove("dropping")));
+  box.addEventListener("dragleave", (e) => dragging(e) && --depth <= 0 && ((depth = 0), box.classList.remove("ui-dropping")));
   box.addEventListener("drop", async (e) => {
     if (!dragging(e)) return;
     e.preventDefault();
     depth = 0;
-    box.classList.remove("dropping");
+    box.classList.remove("ui-dropping");
     const dir = state.route.path;
     queueUpload(dir, await droppedFiles(e.dataTransfer));
   });
@@ -203,12 +203,7 @@ function filesPlaces(path) {
   const home = machine ? "" : (state.files?.home ?? "");
   const inHome = !trash && path !== "#hata" && home !== "" && within(path, home);
   const inside = (folder) => !trash && path !== "#hata" && within(path, folder);
-  const place = (label, to, iconName, active, on = machine) =>
-    h(
-      "a",
-      { class: "cat" + (active ? " active" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, iconName }) },
-      h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
-    );
+  const place = (label, to, iconName, active, on = machine) => uiSideItem({ label, icon: iconName, href: filesHash(to, on), active, menu: (at) => sidebarMenu(at, { label, path: to, machine: on, iconName }) });
   // a favourite file opens its folder with the file chosen
   const favorites = state.favorites ?? [];
   const favoriteRow = (one) => {
@@ -221,29 +216,26 @@ function filesPlaces(path) {
       if (path === parent && !filesMachine()) loadFiles();
       else go(filesHash(parent));
     };
-    return h(
-      "a",
-      { class: "cat", href: filesHash(parent), title: one.path, onclick: show, menu: (at) => menuAt(at, menuHeader(name, one.path, "file"), [{ label: t("common.open"), icon: "folder", run: () => show(new Event("click")) }, { label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) },
-      h("span", { class: "with-icon" }, icon("star"), h("span", { class: "clip" }, name)),
-    );
+    return uiSideItem({ label: name, icon: "star", href: filesHash(parent), title: one.path, onclick: show, menu: (at) => menuAt(at, menuHeader(name, one.path, "file"), [{ label: t("common.open"), icon: "folder", run: () => show(new Event("click")) }, { label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
   const others = machinesUi.list?.machines ?? [];
-  const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
+  const machinesList = others.length > 0 && [uiSideTitle(t("nav.machines")), others.map((m) => uiSideItem({ label: m.name, icon: "server", href: filesHash("/", m.id), active: machine === m.id, muted: !m.online, title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }))];
+  const myHata = (active) => uiSideItem({ label: t("myhata.title"), icon: "home", href: "#/hata", active });
+  const trashItem = () => uiSideItem({ label: t("trash.title"), icon: "trash", href: "#/trash", active: trash });
+  const linksItem = () => uiSideItem({ label: t("links.side"), icon: "link", href: "#/links", active: path === "#links" });
   const shares = myShares();
   if (shares) {
     return put(
       places,
-      h(
-        "nav",
-        { class: "cats" },
-        h("div", { class: "cat-title" }, t("files.places")),
-        h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
-        h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
-        h("a", { class: "cat" + (path === "#links" ? " active" : ""), href: "#/links" }, h("span", { class: "with-icon" }, icon("link"), h("span", { class: "clip" }, t("links.side")))),
-        (state.myShares ?? []).length > 0 && [h("div", { class: "cat-title" }, t("myhata.shared")), state.myShares.map((share) => place(share.name, share.path, "share", !machine && inside(share.path), ""))],
-        (state.myMachines ?? []).map((m) => [h("div", { class: "cat-title" }, m.name), m.shares.map((share) => place(share.name, share.path, "share", machine === m.id && inside(share.path), m.id))]),
-        favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
-      ),
+      uiSide([
+        uiSideTitle(t("files.places")),
+        myHata(path === "#hata"),
+        trashItem(),
+        linksItem(),
+        (state.myShares ?? []).length > 0 && [uiSideTitle(t("myhata.shared")), state.myShares.map((share) => place(share.name, share.path, "share", !machine && inside(share.path), ""))],
+        (state.myMachines ?? []).map((m) => [uiSideTitle(m.name), m.shares.map((share) => place(share.name, share.path, "share", machine === m.id && inside(share.path), m.id))]),
+        favorites.length > 0 && [uiSideTitle(t("files.favorites")), favorites.map(favoriteRow)],
+      ]),
     );
   }
   if (machine) {
@@ -251,17 +243,15 @@ function filesPlaces(path) {
     const volumes = listing?.disks ?? [];
     return put(
       places,
-      h(
-        "nav",
-        { class: "cats" },
-        h("div", { class: "cat-title" }, t("files.places")),
-        h("a", { class: "cat", href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
-        h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("folder"), h("span", { class: "clip" }, t("files.home")))),
+      uiSide([
+        uiSideTitle(t("files.places")),
+        myHata(false),
+        uiSideItem({ label: t("files.home"), icon: "folder", href: "#/files" }),
         machinesList,
-        volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
+        volumes.length > 0 && uiSideTitle(m?.name ?? t("files.disks")),
         volumes.length > 0 && place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))),
         volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine)),
-      ),
+      ]),
     );
   }
   // the connected disks and network drives are places of their own: a disk just connected is found here at once.
@@ -271,19 +261,17 @@ function filesPlaces(path) {
   const onVolume = volumes.some((d) => inside(d.path));
   put(
     places,
-    h(
-      "nav",
-      { class: "cats" },
-      h("div", { class: "cat-title" }, t("files.places")),
-      h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
+    uiSide([
+      uiSideTitle(t("files.places")),
+      myHata(path === "#hata"),
       home && place(t("files.home"), home, "folder", inHome),
       place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "#links" && path !== "" && !inHome && !onVolume),
-      h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
-      h("a", { class: "cat" + (path === "#links" ? " active" : ""), href: "#/links" }, h("span", { class: "with-icon" }, icon("link"), h("span", { class: "clip" }, t("links.side")))),
-      volumes.length > 0 && [h("div", { class: "cat-title" }, t("files.disks")), volumes.map((d) => h("a", { class: "cat" + (inside(d.path) ? " active" : ""), href: filesHash(d.path, ""), title: d.path, menu: (at) => sidebarMenu(at, { label: volumeName(d), path: d.path, volume: d, iconName: d.network ? "globe" : "disk" }) }, h("span", { class: "with-icon" }, icon(d.network ? "globe" : "disk"), h("span", { class: "clip" }, volumeName(d), volumeFolder(d) && h("span", { class: "muted" }, " · " + volumeFolder(d))))))],
-      favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
+      trashItem(),
+      linksItem(),
+      volumes.length > 0 && [uiSideTitle(t("files.disks")), volumes.map((d) => uiSideItem({ label: volumeName(d), sub: volumeFolder(d), icon: d.network ? "globe" : "disk", href: filesHash(d.path, ""), active: inside(d.path), title: d.path, menu: (at) => sidebarMenu(at, { label: volumeName(d), path: d.path, volume: d, iconName: d.network ? "globe" : "disk" }) }))],
+      favorites.length > 0 && [uiSideTitle(t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
-    ),
+    ]),
   );
 }
 
@@ -306,88 +294,71 @@ function renderFilesBody() {
     localStorage.setItem("hata.files.mode", mode);
     renderFilesBody();
   };
-  const modeButton = (mode, iconName) => h("button", { type: "button", class: "btn square" + (filesUi.mode === mode ? " active" : ""), title: t("files.view." + mode), "aria-label": t("files.view." + mode), "aria-pressed": String(filesUi.mode === mode), onclick: () => setMode(mode) }, icon(iconName));
   const sort = h(
     "select",
-    { class: "sort", "aria-label": t("files.sort"), onchange: () => ((filesUi.sort = sort.value), localStorage.setItem("hata.files.sort", sort.value), renderFilesBody()) },
+    { "aria-label": t("files.sort"), onchange: () => ((filesUi.sort = sort.value), localStorage.setItem("hata.files.sort", sort.value), renderFilesBody()) },
     ["name", "modified", "size"].map((key) => h("option", { value: key, selected: filesUi.sort === key }, t("files.sort." + key))),
   );
 
   const isPinned = (listing?.pinned ?? []).includes(path);
   const isShared = (listing?.shared ?? []).includes(listing?.path);
   const trail = filesUi.trail;
+  const here = listing && !listing.error && !machine;
+  // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
+  const folderMore = () => [
+    { label: t("files.reload"), icon: "refresh", run: () => loadFiles() },
+    phone.matches && !(!listing || listing.error || listing.readOnly) && { label: t("files.new"), icon: "plus", run: () => newMenu(path, document.querySelector("#files-main .ui-toolbar-tools .ui-more")) },
+    here && { label: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), icon: "star", on: isFavorite(path), run: () => favorite(path, !isFavorite(path)) },
+    here && isAdmin() && { label: t(isPinned ? "files.unpin" : "files.pin"), icon: "home", on: isPinned, run: () => pinFolder(path, !isPinned) },
+    here && isAdmin() && { label: t(isShared ? "files.shareSettings" : "files.share") + "…", icon: "share", run: () => shareDialog(path) },
+  ].filter(Boolean);
   const navButton = (label, iconName, off, run, cls = "") => h("button", { type: "button", class: "btn square", title: label, "aria-label": label, disabled: off, onclick: run }, icon(iconName, cls));
-  const head = h(
-    "div",
-    { class: "page-head files-head" },
-    h(
-      "div",
-      { class: "files-bar" },
-      h(
-        "div",
-        { class: "files-nav" },
-        navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
-        navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
-        navButton(t("files.up"), "up", !!filesMachine() && path === "/", goUp),
-      ),
-      filesUi.edit ? addressEditor() : filesAddress(path),
-    ),
-    h(
-      "div",
-      { class: "files-tools" },
+  const head = uiToolbar({
+    group: [
+      navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
+      navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
+      navButton(t("files.up"), "up", !!filesMachine() && path === "/", goUp),
+    ],
+    main: filesUi.edit ? addressEditor() : filesAddress(path),
+    tools: [
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
-      // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
-      h("button", { type: "button", class: "btn square", title: t("files.reload"), "aria-label": t("files.reload"), onclick: async (e) => {
-        const mark = e.currentTarget.querySelector(".ico");
-        mark?.classList.add("spin");
-        await loadFiles();
-        mark?.classList.remove("spin");
-      } }, icon("refresh")),
-      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
-      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
-      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
-      sort,
-      h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")),
-      button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
+      // on a phone the sort and "New" make room: "New" is in the "⋯" there
+      !phone.matches && sort,
+      uiSegment([{ value: "list", icon: "list", label: h("span", { class: "sr-only" }, t("files.view.list")) }, { value: "grid", icon: "grid", label: h("span", { class: "sr-only" }, t("files.view.grid")) }], filesUi.mode, setMode, { label: t("files.view") }),
+      !phone.matches && button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
       button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"),
+      uiMore(folderMore),
       picker,
-    ),
-  );
+    ],
+  });
   // what the folder holds, and the room of its disk: under the list, where the files end
   const status =
     listing &&
     !listing.error &&
-    h(
-      "div",
-      { class: "files-status" },
-      h("span", null, listing.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
-      listing.disk && h("span", null, t("files.free", { free: bytes(listing.disk.free), total: bytes(listing.disk.total) })),
+    uiStatus(
+      [listing.readOnly && uiState("warn", t("files.readOnly")), t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "ui-dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))],
+      listing.disk && t("files.free", { free: bytes(listing.disk.free), total: bytes(listing.disk.total) }),
     );
 
-  const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
+  // the bar of the selected stays in sight while a long folder is scrolled
+  const selection = uiSelectBar({ id: "files-selection", sticky: true });
   let body;
   if (!listing) body = h("p", { class: "muted" }, " ");
-  else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
+  else if (listing.error) body = uiCard({}, uiEmpty({ size: "error", title: t("files.cannotRead"), text: listing.error, action: button(t("ui.retry"), { onclick: () => loadFiles() }) }));
   else if (!entries.length)
-    body = h(
-      "div",
-      { class: "card empty-folder" + (listing.readOnly ? " read-only" : "") },
-      icon("folder"),
-      h("div", { class: "grow" }, h("p", { class: "strong" }, t("files.empty")), !listing.readOnly && h("p", { class: "muted small" }, t("files.dropHint"))),
-      !listing.readOnly && h("div", { class: "row-actions" }, button(t("files.uploadFiles"), { class: "primary", onclick: () => picker.click() }, "upload"), button(t("files.newFolder"), { onclick: () => newFolderDialog(path, loadFiles) }, "plus")),
-    );
+    body = uiDropZone(uiEmpty({ size: "big", icon: "folder", title: t("files.empty"), text: listing.readOnly ? null : t("files.dropHint"), action: !listing.readOnly && button(t("files.uploadFiles"), { class: "primary", onclick: () => picker.click() }, "upload") }), { plain: listing.readOnly });
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
   const finding = filesUi.find && filesUi.find.under === path;
   if (finding) body = foundList(filesUi.find);
   // in a list the line closes its card; under tiles or an empty folder it is a card of its own
-  const inCard = !finding && status && body.classList.contains("table-wrap");
+  const inCard = !finding && status && body.classList.contains("ui-files-list");
   if (inCard) body.append(status);
 
-  put(main, head, selection, body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
+  put(main, head, selection, body, listing?.truncated && uiCard({}, uiEmpty({ text: t("files.truncated") })), !finding && !inCard && status && uiCard({ flush: true }, status), uploadBox);
   renderSelection();
   if (filesUi.edit) {
-    const input = main.querySelector(".address-input");
+    const input = main.querySelector(".ui-path-input");
     input.focus();
     if (filesUi.edit.select) input.select();
     else input.setSelectionRange(filesUi.edit.caret ?? input.value.length, filesUi.edit.caret ?? input.value.length);
@@ -440,20 +411,20 @@ function filesAddress(path) {
   const steps = [anchor, ...parts.map((name, i) => ({ label: name, path: (anchor.path === "/" ? "" : anchor.path) + "/" + parts.slice(0, i + 1).join("/") }))];
   const crumbs = h(
     "h1",
-    { class: "crumbs" },
+    { class: "ui-path-crumbs" },
     steps.map((step, i) => [
-      h("a", { class: "crumb" + (i === steps.length - 1 ? " here" : ""), href: filesHash(step.path), "data-step": String(i) }, step.icon && icon(step.icon), h("span", { class: "clip" }, step.label)),
-      h("button", { type: "button", class: "sep", "data-step": String(i), title: t("files.inside", { name: step.label }), "aria-label": t("files.inside", { name: step.label }), onclick: (e) => folderList(e.currentTarget, step.path, steps[i + 1]?.label) }, icon("chevron")),
+      h("a", { class: "ui-path-crumb" + (i === steps.length - 1 ? " ui-path-here" : ""), href: filesHash(step.path), "data-step": String(i) }, step.icon && icon(step.icon), h("span", { class: "clip" }, step.label)),
+      h("button", { type: "button", class: "ui-path-sep", "data-step": String(i), title: t("files.inside", { name: step.label }), "aria-label": t("files.inside", { name: step.label }), onclick: (e) => folderList(e.currentTarget, step.path, steps[i + 1]?.label) }, icon("chevron")),
     ]),
   );
   crumbs.steps = steps;
   const address = h(
     "div",
-    { class: "address", onclick: (e) => (e.target === address || e.target === crumbs) && editAddress() },
+    { class: "ui-path", onclick: (e) => (e.target === address || e.target === crumbs) && editAddress() },
     crumbs,
     h(
       "span",
-      { class: "address-tail" },
+      { class: "ui-path-tail" },
       h("button", { type: "button", class: "icon-btn", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, icon("copy")),
       h("button", { type: "button", class: "icon-btn", title: t("files.typePath"), "aria-label": t("files.typePath"), onclick: () => editAddress() }, icon("edit")),
     ),
@@ -463,7 +434,7 @@ function filesAddress(path) {
 
 /** A long path keeps its last crumbs; the ones before fold into "…", which lists them */
 function fitCrumbs() {
-  const crumbs = document.querySelector("#files-main .crumbs");
+  const crumbs = document.querySelector("#files-main .ui-path-crumbs");
   if (!crumbs?.steps) return;
   const steps = crumbs.steps;
   const hidden = [];
@@ -472,11 +443,11 @@ function fitCrumbs() {
     hidden.push(steps[i]);
   }
   if (!hidden.length) return;
-  const more = h("button", { type: "button", class: "crumb", title: t("files.earlier"), "aria-label": t("files.earlier"), onclick: (e) => {
+  const more = h("button", { type: "button", class: "ui-path-crumb", title: t("files.earlier"), "aria-label": t("files.earlier"), onclick: (e) => {
     const box = e.currentTarget.getBoundingClientRect();
     menuAt({ x: box.left, y: box.bottom + 6 }, null, hidden.map((step) => ({ label: step.label, icon: step.icon ?? "folder", href: filesHash(step.path) })));
   } }, "…");
-  crumbs.prepend(more, h("span", { class: "sep still" }, icon("chevron")));
+  crumbs.prepend(more, h("span", { class: "ui-path-sep ui-path-still" }, icon("chevron")));
 }
 
 /** The folders inside one of the path: the arrow after a crumb */
@@ -520,8 +491,8 @@ function resolvePath(raw) {
 /** The path typed: folders offered as in a terminal, Enter goes there, Esc leaves it */
 function addressEditor() {
   const edit = filesUi.edit;
-  const input = h("input", { class: "address-input mono", value: edit.value, spellcheck: false, autocomplete: "off", autocapitalize: "off", "aria-label": t("files.typePath") });
-  const pop = h("div", { class: "address-pop", hidden: true });
+  const input = h("input", { class: "ui-path-input mono", value: edit.value, spellcheck: false, autocomplete: "off", autocapitalize: "off", "aria-label": t("files.typePath") });
+  const pop = h("div", { class: "ui-path-pop", hidden: true });
   const listings = new Map();
   const listOf = (dir) => {
     if (!listings.has(dir)) listings.set(dir, api("GET", `${filesApi()}?path=${encodeURIComponent(dir)}`).catch((e) => ({ error: errorText(e), entries: [] })));
@@ -536,9 +507,9 @@ function addressEditor() {
   const paint = (message = "") => {
     put(
       pop,
-      message && h("p", { class: "address-error" }, message),
-      hits.map((path, i) => h("button", { type: "button", class: "address-hit" + (i === at ? " on" : ""), onpointerdown: (e) => e.preventDefault(), onclick: () => travel(path) }, icon("folder"), h("span", { class: "clip" }, path))),
-      h("p", { class: "address-keys" }, kbd("↑↓", t("files.keys.choose")), " · ", kbd("Tab", t("files.keys.complete")), " · ", kbd("Enter", t("files.keys.go")), " · ", kbd("Esc", t("files.keys.cancel"))),
+      message && h("p", { class: "ui-path-error" }, message),
+      hits.map((path, i) => h("button", { type: "button", class: "ui-path-hit" + (i === at ? " ui-on" : ""), onpointerdown: (e) => e.preventDefault(), onclick: () => travel(path) }, icon("folder"), h("span", { class: "clip" }, path))),
+      h("p", { class: "ui-path-keys" }, kbd("↑↓", t("files.keys.choose")), " · ", kbd("Tab", t("files.keys.complete")), " · ", kbd("Enter", t("files.keys.go")), " · ", kbd("Esc", t("files.keys.cancel"))),
     );
     pop.hidden = false;
   };
@@ -608,7 +579,7 @@ function addressEditor() {
   // a click elsewhere puts the crumbs back
   input.addEventListener("blur", () => setTimeout(() => !leaving && filesUi.edit === edit && document.activeElement !== input && close(), 0));
   input.addEventListener("focus", () => pop.hidden && paint());
-  return h("div", { class: "address editing" }, input, pop);
+  return h("div", { class: "ui-path ui-path-editing" }, input, pop);
 }
 
 /** The keys of Files: the cursor moves with the arrows, Enter opens, Space chooses; the path by Ctrl+L or "/" */
@@ -682,7 +653,7 @@ function setCursor(name) {
   filesUi.cursor = name;
   for (const el of document.querySelectorAll("#files-main [data-name]")) {
     const on = el.dataset.name === name;
-    el.classList.toggle("cursor", on);
+    el.classList.toggle("ui-cursor", on);
     if (on) el.scrollIntoView({ block: "nearest" });
   }
 }
@@ -690,10 +661,8 @@ function setCursor(name) {
 /** How full a disk is: a thin bar and "free X of Y" — on a narrow tile only "X free", the rest on hover */
 function diskRoom(volume, short = false) {
   const used = Math.round(((volume.total - volume.free) / volume.total) * 100);
-  const fill = h("i", { class: level(used) });
-  fill.style.width = used + "%";
   const whole = t("files.free", { free: bytes(volume.free), total: bytes(volume.total) });
-  return h("span", { class: "tile-room", title: short ? whole : "" }, h("span", { class: "bar" }, fill), h("span", { class: "muted small clip" }, short ? t("home.diskFree", { free: bytes(volume.free) }) : whole));
+  return uiRoom(used, short ? t("home.diskFree", { free: bytes(volume.free) }) : whole, short ? whole : "");
 }
 
 /** What a disk is called: its label, or the folder it is mounted at */
@@ -726,20 +695,22 @@ async function loadMyHata() {
 const myHataUi = { root: null };
 
 /** A tile of My Hata: what it is, where, and how full when it is a file system */
-function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "", words = false }) {
-  let bar = null;
+function hataTile({ href, onclick, iconName, title, sub, room, menu, adds = false, away = false, words = false }) {
+  let foot = null;
   if (room?.total) {
     const used = Math.round(((room.total - room.free) / room.total) * 100);
-    const fill = h("i", { class: level(used) });
-    fill.style.width = used + "%";
-    bar = [h("span", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(room.free), total: bytes(room.total) }))];
+    foot = [uiMeter(used), h("span", { class: "ui-tile-free" }, t("files.free", { free: bytes(room.free), total: bytes(room.total) }))];
   }
-  return h(
-    "a",
-    { class: "disk-tile " + cls, href: href ?? "#", onclick, menu },
-    h("span", { class: "badge-icon plain" }, icon(iconName)),
-    h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, title), sub && h("span", { class: "muted small clip" + (words ? "" : " mono") }, sub), bar),
-  );
+  return uiTile({
+    href: href ?? (onclick ? null : "#"),
+    onclick: onclick ? (e) => (e.preventDefault?.(), onclick(e)) : null,
+    icon: iconName,
+    name: title,
+    sub: sub && (words || !String(sub).startsWith("/") ? sub : h("span", { class: "mono" }, sub)),
+    foot,
+    menu,
+    kind: [adds ? "adds" : "", away ? "away" : ""].filter(Boolean).join(" "),
+  });
 }
 
 function renderMyHata() {
@@ -753,40 +724,37 @@ function renderMyHata() {
     const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
     return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
-  const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), cls: m.online ? "" : "away" });
-  const section = (title, tiles, extra) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title), extra), h("div", { class: "disk-strip hata-grid" }, tiles));
+  const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), away: !m.online });
+  const section = (title, tiles, extra) => uiCard({ title, actions: extra }, h("div", { class: "ui-tiles" }, tiles));
   const local = disks.filter((d) => !d.network);
   const network = disks.filter((d) => d.network);
   const machines = machinesUi.list?.machines ?? [];
   const favorites = state.favorites ?? [];
   shell(
-    h(
-      "div",
-      { class: "files" },
-      h("aside", { class: "files-side fold", id: "files-places" }),
-      h(
-        "section",
-        { class: "stack", id: "files-main" },
-        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.lead")))),
+    uiWithSide({
+      sideId: "files-places",
+      mainId: "files-main",
+      main: [
+        pageHead({ title: t("myhata.title"), facts: [t("myhata.lead")] }),
         !listing
-          ? waitMark()
+          ? uiCard({}, uiEmpty({ size: "loading" }))
           : [
               section(t("myhata.server"), [
                 home && hataTile({ href: filesHash(home, ""), iconName: "folder", title: t("files.home"), sub: home, room: listing.disk }),
                 hataTile({ href: filesHash("/", ""), iconName: "disk", title: t("files.root"), sub: "/", room: myHataUi.root }),
                 hataTile({ href: "#/trash", iconName: "trash", title: t("trash.title"), sub: t("myhata.trash") }),
               ]),
-              section(t("files.disks"), local.length ? local.map(volumeTile) : h("p", { class: "muted small" }, t("myhata.noDisks")), h("a", { class: "link small", href: "#/settings/storage" }, t("myhata.storage"))),
+              section(t("files.disks"), local.length ? local.map(volumeTile) : uiEmpty({ text: t("myhata.noDisks") }), h("a", { class: "ui-link", href: "#/storage/disks" }, t("myhata.storage"), icon("chevron"))),
               section(t("myhata.network"), [
                 ...network.map(volumeTile),
-                hataTile({ onclick: (e) => (e.preventDefault(), findPlacesDialog()), iconName: "search", title: t("myhata.browse"), sub: t("myhata.browseLead"), cls: "add" }),
-                hataTile({ onclick: addPlaceHere, iconName: "plus", title: t("netplace.sidebar"), sub: t("myhata.addPlace"), cls: "add" }),
+                hataTile({ onclick: (e) => (e.preventDefault(), findPlacesDialog()), iconName: "search", title: t("myhata.browse"), sub: t("myhata.browseLead"), adds: true }),
+                hataTile({ onclick: addPlaceHere, iconName: "plus", title: t("netplace.sidebar"), sub: t("myhata.addPlace"), adds: true }),
               ]),
               favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
-              section(t("nav.machines"), machines.length ? machines.map(machineTile) : hataTile({ href: "#/machines", iconName: "plus", title: t("myhata.addMachine"), sub: t("myhata.addMachineLead"), cls: "add" }), machines.length > 0 && h("a", { class: "link small", href: "#/machines" }, t("myhata.allMachines"))),
+              section(t("nav.machines"), machines.length ? machines.map(machineTile) : hataTile({ href: "#/machines", iconName: "plus", title: t("myhata.addMachine"), sub: t("myhata.addMachineLead"), adds: true }), machines.length > 0 && h("a", { class: "ui-link", href: "#/machines" }, t("myhata.allMachines"), icon("chevron"))),
             ],
-      ),
-    ),
+      ],
+    }),
   );
   filesPlaces("#hata");
 }
@@ -795,32 +763,29 @@ function renderMyHata() {
 function renderMySharedFolders() {
   const shares = state.myShares;
   const favorites = state.favorites ?? [];
-  const section = (title, tiles) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title)), h("div", { class: "disk-strip hata-grid" }, tiles));
+  const section = (title, tiles) => uiCard({ title }, h("div", { class: "ui-tiles" }, tiles));
   // a machine that is away keeps its tiles, greyed: its folders open once it is back
-  const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, cls: m && !m.online ? "away" : "", menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
+  const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, away: !!m && !m.online, menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
   const favoriteTile = (one) => {
     const name = one.path.split("/").pop() || "/";
     const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
     return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
   shell(
-    h(
-      "div",
-      { class: "files" },
-      h("aside", { class: "files-side fold", id: "files-places" }),
-      h(
-        "section",
-        { class: "stack", id: "files-main" },
-        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
+    uiWithSide({
+      sideId: "files-places",
+      mainId: "files-main",
+      main: [
+        pageHead({ title: t("myhata.title"), facts: [t("myhata.sharedLead")] }),
         !shares
-          ? waitMark()
+          ? uiCard({}, uiEmpty({ size: "loading" }))
           : [
-              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
+              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : uiEmpty({ text: t("myhata.nothingShared") })),
               (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
               favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
             ],
-      ),
-    ),
+      ],
+    }),
   );
   filesPlaces("#hata");
 }
@@ -832,7 +797,7 @@ function toggleSelected(entry, on) {
   else filesUi.selected.delete(entry.name);
   for (const el of document.querySelectorAll("#files-main [data-name]")) {
     if (el.dataset.name !== entry.name) continue;
-    el.classList.toggle("selected", on);
+    el.classList.toggle("ui-selected", on);
     el.querySelector("input[type=checkbox]").checked = on;
   }
   renderSelection();
@@ -850,17 +815,17 @@ function renderSelection() {
   }
   if (!chosen.length) return;
   put(box,
-    h("strong", { class: "grow" }, t("files.selected", { n: chosen.length }), h("span", { class: "muted small" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
+    h("span", null, t("files.selected", { n: chosen.length }), h("span", { class: "muted" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
     button(t("files.download"), { class: "small", onclick: () => downloadEntries(chosen) }, "download"),
     !state.files.readOnly && button(t("files.move"), { class: "small", onclick: () => transferDialog(chosen, false) }, "arrow"),
     button(t("files.copy"), { class: "small", onclick: () => transferDialog(chosen, true) }, "copy"),
-    !state.files.readOnly && button(t("files.delete"), { class: "small", onclick: () => deleteDialog(chosen) }, "trash"),
-    h("button", { type: "button", class: "icon-btn", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, icon("x")),
+    !state.files.readOnly && button(t("files.delete") + "…", { class: "small danger-text", onclick: () => deleteDialog(chosen) }, "trash"),
+    button("", { class: "small square", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, "x"),
   );
 }
 
 const entryCheckbox = (entry) => h("input", { type: "checkbox", checked: filesUi.selected.has(entry.name), "aria-label": entry.name, onclick: (e) => e.stopPropagation(), onchange: (e) => toggleSelected(entry, e.target.checked) });
-const entryMore = (entry) => h("button", { type: "button", class: "icon-btn", "aria-label": `${t("files.actions")}: ${entry.name}`, title: t("files.actions"), onclick: (e) => (e.preventDefault(), e.stopPropagation(), entryMenu(entry)) }, icon("more"));
+const entryMore = (entry) => h("button", { type: "button", class: "btn small square ui-more", "aria-label": `${t("files.actions")}: ${entry.name}`, title: t("files.actions"), onclick: (e) => (e.preventDefault(), e.stopPropagation(), entryMenu(entry, e.currentTarget)) }, icon("more"));
 /** A folder is a link (so it opens in a new tab too); a file opens in place */
 const entryOpener = (entry, className, ...content) =>
   entry.type === "dir"
@@ -870,7 +835,7 @@ const entryOpener = (entry, className, ...content) =>
 /** Small signs after a name: a favourite, a folder on the dashboard, a folder shared over the network */
 const entryMarks = (entry) => {
   const path = joinPath(state.files.path, entry.name);
-  const mark = (iconName, title) => h("span", { class: "shared-mark", title }, icon(iconName));
+  const mark = (iconName, title) => uiNameMark(iconName, title);
   const here = !filesMachine();
   return [
     here && entry.type !== "other" && isFavorite(path) && mark("star", t("files.favoriteMark")),
@@ -889,14 +854,14 @@ function filesTable(entries) {
   const row = (entry) =>
     h(
       "tr",
-      { class: (filesUi.selected.has(entry.name) ? "selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
-      h("td", { class: "tick" }, entryCheckbox(entry)),
-      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), entryMarks(entry))),
+      { class: (filesUi.selected.has(entry.name) ? "ui-selected" : "") + (filesUi.cursor === entry.name ? " ui-cursor" : ""), "data-name": entry.name },
+      h("td", { class: "ui-files-tick" }, entryCheckbox(entry)),
+      h("td", { class: "ui-files-name" }, entryOpener(entry, "ui-files-open", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), entryMarks(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
-      h("td", { class: "muted when" }, fileTime(entry.modified)),
-      h("td", { class: "tick" }, entryMore(entry)),
+      h("td", { class: "muted ui-files-when" }, fileTime(entry.modified)),
+      h("td", { class: "ui-files-tick" }, entryMore(entry)),
     );
-  return h("div", { class: "card table-wrap" }, h("table", { class: "file-table" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "when" }, t("files.col.modified")), h("th"))), h("tbody", null, entries.map(row))));
+  return uiFilesList([h("th", { class: "ui-files-tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified")), h("th")], entries.map(row));
 }
 
 /** A file without a picture: its extension and what it is, on the colour of its kind */
@@ -904,7 +869,7 @@ function extBadge(entry) {
   const dot = entry.name.lastIndexOf(".");
   const ext = dot > 0 ? entry.name.slice(dot + 1) : "";
   const tint = TINT_BY_EXT[ext.toLowerCase()] ?? "other";
-  return h("span", { class: "ext tint-" + tint }, ext && ext.length <= 5 ? h("b", null, ext.toUpperCase()) : fileIcon(entry), h("small", null, t("files.kind." + tint)));
+  return uiFileBadge(ext && ext.length <= 5 ? h("b", null, ext.toUpperCase()) : fileIcon(entry), t("files.kind." + tint), tint);
 }
 
 /** The first lines of text files, by path and time, so a new drawing of the folder does not ask again */
@@ -914,7 +879,7 @@ const PEEK_BYTES = 2048;
 /** The thumbnail of a text file: its first lines, read when the tile comes into view */
 function textPeek(entry, path, badge) {
   const key = `${filesMachine()}:${path}:${entry.modified}`;
-  const box = h("span", { class: "thumb" }, peeks.get(key) ?? badge);
+  const box = uiFileThumb(peeks.get(key) ?? badge);
   if (peeks.has(key)) return box;
   const seen = new IntersectionObserver(async ([view]) => {
     if (!view.isIntersecting) return;
@@ -930,7 +895,7 @@ function textPeek(entry, path, badge) {
       const text = lines.slice(0, 16).join("\n");
       if (!text.trim()) return;
       if (peeks.size > 300) peeks.delete(peeks.keys().next().value);
-      peeks.set(key, h("pre", { class: "peek" }, text));
+      peeks.set(key, h("pre", { class: "ui-file-peek" }, text));
       box.replaceChildren(peeks.get(key));
     } catch {}
   });
@@ -945,25 +910,22 @@ function filesGrid(dirs, rest) {
     let thumb = null;
     if (entry.type !== "dir") {
       const badge = extBadge(entry);
-      if (kind === "image" && entry.size <= THUMB_MAX) thumb = h("span", { class: "thumb" }, h("img", { src: rawUrl(path), alt: "", loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.replaceWith(badge) }));
+      if (kind === "image" && entry.size <= THUMB_MAX) thumb = uiFileThumb(h("img", { src: rawUrl(path), alt: "", loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.replaceWith(badge) }));
       else if (kind === "text" && entry.size > 0 && entry.size <= TEXT_MAX) thumb = textPeek(entry, path, badge);
-      else thumb = h("span", { class: "thumb" }, badge);
+      else thumb = uiFileThumb(badge);
     }
-    return h(
-      "div",
-      { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
-      entryOpener(entry, "file-open", thumb, entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, entryMarks(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
-      h("span", { class: "file-tick" }, entryCheckbox(entry)),
-      h("span", { class: "file-more" }, entryMore(entry)),
-    );
+    return uiFileTile({
+      name: entry.name,
+      dir: entry.type === "dir",
+      selected: filesUi.selected.has(entry.name),
+      cursor: filesUi.cursor === entry.name,
+      open: entryOpener(entry, "ui-file-open", thumb, entry.type === "dir" && fileIcon(entry), h("span", { class: "ui-file-text" }, h("span", { class: "clip strong" }, entry.name, entryMarks(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+      tick: entryCheckbox(entry),
+      more: entryMore(entry),
+    });
   };
   // the boxes to tick show on the tile under the pointer, and on all of them once something is chosen
-  return h(
-    "div",
-    { class: "stack files-tiles" + (filesUi.selected.size ? " choosing" : "") },
-    dirs.length > 0 && h("div", { class: "file-grid dirs" }, dirs.map(tile)),
-    rest.length > 0 && h("div", { class: "file-grid" }, rest.map(tile)),
-  );
+  return uiFileGrid([dirs.map(tile), rest.map(tile)], { choosing: filesUi.selected.size > 0 });
 }
 
 function openEntry(entry) {
@@ -993,6 +955,12 @@ async function downloadEntries(entries) {
 /** Puts a menu where the pointer is, inside the window; a right click beside it moves it there */
 function placeAt(dialog, at) {
   const page = document.documentElement;
+  // opened by a button: under it, its right edge at the button's; above it when there is no room below
+  if (at instanceof Element) {
+    const r = at.getBoundingClientRect();
+    const below = r.bottom + 4 + dialog.offsetHeight <= page.clientHeight - 8;
+    at = { x: r.right - dialog.offsetWidth, y: below ? r.bottom + 4 : r.top - 4 - dialog.offsetHeight };
+  }
   dialog.style.right = "auto";
   dialog.style.left = Math.max(8, Math.min(at.x, page.clientWidth - dialog.offsetWidth - 8)) + "px";
   dialog.style.top = Math.max(8, Math.min(at.y, page.clientHeight - dialog.offsetHeight - 8)) + "px";
@@ -1012,8 +980,8 @@ function menuAt(at, header, entries) {
   let dialog;
   const one = (e) =>
     e.href
-      ? h("a", { class: "menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
-      : h("button", { type: "button", class: "menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
+      ? h("a", { class: "ui-menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
+      : h("button", { type: "button", class: "ui-menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
   const marked = (e, el) => (e.on && el.append(icon("check", "on-mark")), el);
   dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map((e) => marked(e, one(e))));
   placeAt(dialog, at);
@@ -1023,7 +991,8 @@ function menuAt(at, header, entries) {
   return dialog;
 }
 
-const menuHeader = (title, sub, iconName) => h("header", null, iconName && h("span", { class: "badge-icon plain" }, icon(iconName)), h("div", null, h("h2", { class: "clip" }, title), sub && h("span", { class: "muted small clip" }, sub)));
+/** What a menu is about: its icon (a name or a ready icon), title and a line under it */
+const menuHeader = (title, sub, iconName) => h("header", null, iconName && uiLead(iconName instanceof Node ? h("span", { class: "ui-lead" }, iconName) : { icon: iconName }), h("div", null, h("h2", { class: "clip" }, title), sub && h("span", { class: "muted small clip" }, sub)));
 
 /** A card of the store: install it, or go to it once it is installed */
 const storeCardMenu = (a, isIn, at) =>
@@ -1039,12 +1008,12 @@ const hasOwnMenu = (el) => {
 };
 
 /** The rows a right click finds the actions of by themselves: what their buttons and their link do */
-const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .tool";
+const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .ui-attention, .tool";
 
 /** The menu of a row made of its own buttons — the same actions, where the pointer is; false — it has none */
 function rowMenu(row, at) {
   const shown = (el) => el.getClientRects().length > 0 && !el.closest("dialog:not([open])");
-  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item") && !b.classList.contains("select-btn") && b.type !== "submit");
+  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item, .ui-menu-item") && !b.classList.contains("select-btn") && b.type !== "submit");
   // the name, without the chips that sit inside it ("test" of "test · Everything")
   const named = row.querySelector("h2 .with-icon") ?? row.querySelector("strong, h2, h3, .strong, .name");
   const title = (named && ([...named.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || named.textContent.trim())) || "";
@@ -1132,31 +1101,31 @@ function filesContext(e) {
 }
 
 function selectionMenu(chosen, at) {
-  let dialog;
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    "menu dropdown",
-    h("header", null, h("div", null, h("h2", null, t("files.selected", { n: chosen.length })), h("span", { class: "muted small" }, bytes(chosen.reduce((n, entry) => n + entry.size, 0))))),
+  const item = (label, iconName, run, cls = "") => ({ label, icon: iconName, run, danger: cls === "danger" });
+  menuAt(
+    at,
+    menuHeader(t("files.selected", { n: chosen.length }), bytes(chosen.reduce((n, entry) => n + entry.size, 0))),
+    [
     item(t("files.downloadZip"), "download", () => downloadEntries(chosen)),
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog(chosen, false)),
     item(t("files.copy"), "copy", () => transferDialog(chosen, true)),
     item(t("files.clearSelection"), "x", () => ((filesUi.selected = new Set()), renderFilesBody())),
     !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog(chosen), "danger"),
+    ],
   );
-  placeAt(dialog, at);
 }
 
 function folderMenu(at) {
-  let dialog;
   const listing = state.files;
   const path = listing.path;
-  const item = (label, iconName, action, off) => h("button", { type: "button", class: "menu-item", disabled: !!off, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    "menu dropdown",
-    h("header", null, h("span", { class: "badge-icon plain" }, icon("folder")), h("div", null, h("h2", { class: "clip" }, path.split("/").pop() || "/"))),
+  const item = (label, iconName, run, off) => ({ label, icon: iconName, run, off: !!off });
+  menuAt(
+    at,
+    menuHeader(path.split("/").pop() || "/", null, "folder"),
+    [
     item(t("files.newFolder"), "folder", () => newFolderDialog(path, loadFiles), listing.readOnly),
     item(t("files.newFile"), "file", () => newFileDialog(path), listing.readOnly),
-    item(t("files.upload"), "upload", () => document.querySelector("#files-main .page-head input[type=file]")?.click(), listing.readOnly),
+    item(t("files.upload"), "upload", () => document.querySelector("#files-main .ui-toolbar input[type=file]")?.click(), listing.readOnly),
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
     item(t("files.size"), "disk", () => sizeDialog(path, path.split("/").pop() || "/")),
@@ -1167,18 +1136,18 @@ function folderMenu(at) {
     !listing.machine && mayLink() && path !== "/" && item(t("links.menu"), "link", () => shareLinkDialog(path, path.split("/").pop() || "/", true)),
     !listing.machine && mayLink() && path !== "/" && !listing.readOnly && item(t("links.menuDrop"), "upload", () => shareLinkDialog(path, path.split("/").pop() || "/", true, "drop")),
     machineLet(listing.machine) && path !== "/" && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(listing.machine), path)),
+    ],
   );
-  placeAt(dialog, at);
 }
 
 function entryMenu(entry, at) {
-  let dialog;
   const kind = fileKind(entry);
   const path = joinPath(state.files.path, entry.name);
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, h("span", { class: "badge-icon plain" }, fileIcon(entry)), h("div", null, h("h2", { class: "clip" }, entry.name), h("span", { class: "muted small" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+  const item = (label, iconName, run, cls = "") => ({ label, icon: iconName, run, danger: cls === "danger" });
+  menuAt(
+    at ?? { x: Math.max(8, innerWidth / 2 - 130), y: 120 },
+    menuHeader(entry.name, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified), fileIcon(entry)),
+    [
     entry.type === "dir" && item(t("common.open"), "folder", () => go(filesHash(path))),
     entry.type === "dir" && at && item(t("files.openTab"), "external", () => window.open(filesHash(path), "_blank", "noopener")),
     ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
@@ -1201,8 +1170,8 @@ function entryMenu(entry, at) {
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
     !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
+    ],
   );
-  if (at) placeAt(dialog, at);
 }
 
 /** How much room a folder takes: counted when asked for, since a large one takes a while */
@@ -1266,11 +1235,10 @@ async function extractArchive(path) {
 
 /** What can be made in a folder */
 function newMenu(path, anchor) {
-  let dialog;
-  const item = (label, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog("menu dropdown", item(t("files.newFolder"), "folder", () => newFolderDialog(path, loadFiles)), item(t("files.newFile"), "file", () => newFileDialog(path)));
-  const box = anchor.getBoundingClientRect();
-  placeAt(dialog, { x: box.right - dialog.offsetWidth, y: box.bottom + 4 });
+  menuAt(anchor, null, [
+    { label: t("files.newFolder"), icon: "folder", run: () => newFolderDialog(path, loadFiles) },
+    { label: t("files.newFile"), icon: "file", run: () => newFileDialog(path) },
+  ]);
 }
 
 /** A new empty text file, opened in the editor at once */
@@ -1283,12 +1251,12 @@ const newFileDialog = (dir) =>
 
 /** The search field of the folder on screen: names under it, found by the server */
 function findBox(path) {
-  const input = h("input", { type: "search", class: "find", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
+  const input = h("input", { type: "search", class: "ui-findbox-input", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
   let timer;
   const run = async () => {
     const query = input.value.trim();
     if (query.length < 2) {
-      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main input.find")?.focus();
+      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main input.ui-findbox-input")?.focus();
       return;
     }
     filesUi.find = { under: path, query, found: null, more: false };
@@ -1302,7 +1270,7 @@ function findBox(path) {
     }
     const caret = input.selectionStart;
     renderFilesBody();
-    const again = document.querySelector("#files-main input.find");
+    const again = document.querySelector("#files-main input.ui-findbox-input");
     if (again) (again.focus(), again.setSelectionRange(caret, caret));
   };
   input.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(run, 400))));
@@ -1311,14 +1279,14 @@ function findBox(path) {
     if (e.key === "Escape") ((input.value = ""), clearTimeout(timer), void run());
   });
   // it searches by itself as one types; the button is for whoever does not know that
-  return h("div", { class: "find-box" }, input, h("button", { type: "button", class: "find-go", title: t("files.findGo"), "aria-label": t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) }, icon("search")));
+  return uiFindBox(input, { label: t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) });
 }
 
 /** What a search found: each with the folder it lies in; a folder opens, a file opens its folder with it chosen */
 function foundList(find) {
-  if (find.error) return h("p", { class: "card pad error" }, find.error);
-  if (!find.found) return h("p", { class: "muted" }, t("files.finding"));
-  if (!find.found.length) return h("div", { class: "card empty" }, icon("search"), h("p", null, t("files.nothingFound", { query: find.query })));
+  if (find.error) return uiCard({}, uiEmpty({ size: "error", title: t("files.cannotRead"), text: find.error }));
+  if (!find.found) return uiCard({}, uiEmpty({ size: "loading", text: t("files.finding") }));
+  if (!find.found.length) return uiCard({}, uiEmpty({ size: "big", icon: "search", title: t("files.nothingFound", { query: find.query }) }));
   const show = (item) => {
     const parent = item.path.slice(0, item.path.lastIndexOf("/")) || "/";
     if (item.type === "dir") return go(filesHash(item.path));
@@ -1332,16 +1300,16 @@ function foundList(find) {
     return h(
       "tr",
       null,
-      h("td", { class: "name" }, h("button", { type: "button", class: "file-name", onclick: () => show(item) }, fileIcon({ name, type: item.type }), h("span", { class: "clip" }, name)), h("div", { class: "muted small clip mono" }, parent)),
+      h("td", { class: "ui-files-name" }, h("button", { type: "button", class: "ui-files-open", onclick: () => show(item) }, fileIcon({ name, type: item.type }), h("span", { class: "clip" }, name)), h("div", { class: "muted small clip mono" }, parent)),
       h("td", { class: "num muted" }, item.type === "file" ? bytes(item.size) : "—"),
-      h("td", { class: "muted when" }, item.modified ? fileTime(item.modified) : ""),
+      h("td", { class: "muted ui-files-when" }, item.modified ? fileTime(item.modified) : ""),
     );
   };
   return h(
     "div",
     { class: "stack" },
     h("p", { class: "muted small" }, t(find.more ? "files.foundMore" : "files.found", { n: find.found.length, query: find.query })),
-    h("div", { class: "card table-wrap" }, h("table", { class: "file-table" }, h("thead", null, h("tr", null, h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "when" }, t("files.col.modified")))), h("tbody", null, find.found.map(row)))),
+    uiFilesList([h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified"))], find.found.map(row)),
   );
 }
 
@@ -1368,7 +1336,7 @@ async function deleteDialog(entries) {
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  const note = h("p", { class: "muted" }, t(machine ? "files.machineDeleteLead" : "files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) }));
+  const note = h("div", { class: "muted" }, t(machine ? "files.machineDeleteLead" : "files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) }));
   const run = async (e, forever) => {
     const pressed = e.currentTarget;
     pressed.disabled = true;
@@ -1379,8 +1347,7 @@ async function deleteDialog(entries) {
       // a disk that keeps no trash: what is left is to delete for good, and the dialog says so
       if (err.code === "files.noTrash" && !forever) {
         pressed.hidden = true;
-        note.className = "banner small";
-        note.textContent = errorText(err);
+        note.replaceChildren(uiNotice({ tone: "warn", text: errorText(err) }));
         return void loadFiles();
       }
       toast(errorText(err), "error");
@@ -1392,8 +1359,8 @@ async function deleteDialog(entries) {
     "confirm",
     h("h2", { class: "wrap" }, entries.length === 1 ? t("files.deleteTitle", { name: entries[0].name }) : t("files.deleteMany", { n: entries.length })),
     note,
-    !machine && within(dir, joinPath(state.files.home, "AppData")) ? h("p", { class: "banner small" }, t("files.deleteAppData")) : null,
-    machine && h("p", { class: "banner small" }, t("files.machineNoTrash")),
+    !machine && within(dir, joinPath(state.files.home, "AppData")) ? uiNotice({ tone: "warn", text: t("files.deleteAppData") }) : null,
+    machine && uiNotice({ tone: "warn", text: t("files.machineNoTrash") }),
     machine
       ? h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("files.deleteForever"), { class: "danger", onclick: (e) => run(e, true) }, "trash"))
       : h("footer", null, button(t("files.deleteForever"), { class: "ghost danger-text small", onclick: (e) => run(e, true) }), closeButton(() => dialog, t("common.cancel")), button(t("files.toTrash"), { class: "primary", autofocus: true, onclick: (e) => run(e, false) }, "trash")),
@@ -1487,17 +1454,18 @@ function renderTrash() {
     onchange: (e) => (items.forEach((item) => (e.target.checked ? trashChosen.add(item.id) : trashChosen.delete(item.id))), renderTrash()),
   });
   all.indeterminate = chosen.length > 0 && chosen.length < items.length;
-  const row = (item) =>
-    h(
-      "tr",
-      { class: trashChosen.has(item.id) ? "chosen" : "" },
-      h("td", { class: "tick" }, tick(item)),
-      h("td", null, h("div", { class: "with-icon strong" }, icon(item.type === "dir" ? "folder" : "file"), h("span", { class: "clip" }, item.name))),
-      h("td", null, h("a", { class: "muted small mono clip block", href: filesHash(folderOf(item.from)) }, folderOf(item.from))),
-      h("td", null, h("div", null, ago(item.at)), item.by && h("div", { class: "muted small" }, item.by)),
-      h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
-      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
-    );
+  const remove = (item) => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead"));
+  const row = (item) => ({
+    cells: [
+      uiCell({ tick: tick(item), lead: { icon: item.type === "dir" ? "folder" : "file" }, name: item.name, sub: item.type === "dir" ? t("trash.files", { n: item.files }) : null }),
+      h("a", { class: "mono small", href: filesHash(folderOf(item.from)), title: folderOf(item.from) }, folderOf(item.from)),
+      uiCell({ name: ago(item.at), sub: item.by }),
+      bytes(item.size),
+      uiLine([button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && uiMore([{ label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }], { size: "s" })], { end: true }),
+    ],
+    sub: [folderOf(item.from), ago(item.at), bytes(item.size)].join(" · "),
+    menu: (at) => menuAt(at, null, [{ label: t("trash.restore"), icon: "undo", run: () => back([item])({ currentTarget: {} }) }, isAdmin() && { label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }].filter(Boolean)),
+  });
   const keep = data?.keepDays ?? 30;
   const days = h(
     "select",
@@ -1505,30 +1473,32 @@ function renderTrash() {
     [...new Set([...TRASH_DAYS, keep])].sort((a, b) => a - b).map((n) => h("option", { value: String(n), selected: n === keep }, trashDaysText(n))),
   );
   const chosenSize = chosen.reduce((sum, item) => sum + item.size, 0);
-  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" },
-    h(
-      "div",
-      { class: "page-head" },
-      h("div", null, h("h1", null, t("trash.title")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files")), h("span", { class: "dot-sep" }, "·"), t("trash.meta", { n: items.length, size: bytes(data?.size ?? 0) }))),
-      h(
-        "div",
-        { class: "actions" },
-        chosen.length > 0 && button(t("trash.restoreChosen", { n: chosen.length }), { onclick: back(chosen) }, "undo"),
-        chosen.length > 0 && isAdmin() && button(t("trash.deleteChosen", { n: chosen.length }), { class: "danger", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
-        chosen.length === 0 && items.length > 0 && isAdmin() && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash"),
-      ),
-    ),
-    h(
-      "div",
-      { class: "card table-wrap" },
-      h("div", { class: "pad trash-keep" }, h("p", { class: "muted small grow" }, t("trash.lead", { days: trashDaysText(keep) })), data && isAdmin() && h("label", { class: "with-icon small" }, h("span", null, t("trash.keep")), days)),
+  const emptyAll = () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) }));
+  shell(uiWithSide({ sideId: "files-places", main: [
+    pageHead({
+      crumbs: [{ label: t("nav.files"), href: "#/files" }, { label: t("trash.title") }],
+      title: t("trash.title"),
+      facts: data ? [t("trash.meta", { n: items.length, size: bytes(data.size ?? 0) })] : null,
+      actions: [items.length > 0 && isAdmin() && { label: t("trash.empty") + "…", icon: "trash", danger: true, run: emptyAll }],
+    }),
+    uiCard(
+      { flush: true },
+      data && isAdmin() && uiSetting({ name: t("trash.keep"), explain: t("trash.lead", { days: trashDaysText(keep) }), control: days }),
+      chosen.length > 0 &&
+        h(
+          "div",
+          { class: "ui-select-bar" },
+          h("span", null, t("files.selected", { n: chosen.length })),
+          button(t("trash.restore"), { class: "small", onclick: back(chosen) }, "undo"),
+          isAdmin() && button(t("files.deleteForever") + "…", { class: "small danger-text", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
+        ),
       !data
-        ? null
+        ? uiEmpty({ size: "loading" })
         : items.length === 0
-          ? h("p", { class: "empty" }, t("trash.nothing"))
-          : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
+          ? uiEmpty({ size: "big", icon: "trash", title: t("trash.nothing") })
+          : uiTable([{ label: h("span", { class: "ui-cell" }, all, t("files.col.name")) }, { label: t("trash.col.from") }, { label: t("trash.col.deleted") }, { label: t("files.col.size"), num: true }, { label: "" }], items.map(row)),
     ),
-  )));
+  ] }));
   filesPlaces(null);
 }
 
@@ -1543,9 +1513,9 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
   let on = machine;
   let home = "";
   let dialog;
-  const crumbs = h("div", { class: "crumbs wrap" });
-  const quick = h("div", { class: "picker-quick" });
-  const folders = h("div", { class: "picker" });
+  const crumbs = h("div", { class: "ui-path-crumbs wrap" });
+  const quick = uiLine([]);
+  const folders = h("div", { class: "ui-rows ui-picker" });
   const error = h("p", { class: "error", role: "alert" });
   const confirm = button(confirmLabel, {
     class: "primary",
@@ -1581,18 +1551,18 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     const share = mine?.filter((one) => within(at, one.path)).sort((a, b) => b.path.length - a.path.length)[0];
     const base = share ? share.path : "/";
     const parts = at.slice(base.length).split("/").filter(Boolean);
-    const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
+    const crumb = (label, to) => h("button", { type: "button", class: "ui-path-crumb", onclick: () => show(to) }, label);
     const other = on && machinesUi.list?.machines.find((m) => m.id === on);
     put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb(share ? share.name : "/", base), parts.map((part, i) => [(i > 0 || share) && icon("chevron"), crumb(part, (base === "/" ? "" : base) + "/" + parts.slice(0, i + 1).join("/"))]));
     // the data folder and the disks, one press away wherever the picker is; with `machines` the other machines too
-    const jump = (label, to, iconName, target = on) => h("button", { type: "button", class: "chip-btn" + (target === on && (at === to || at.startsWith(to + "/")) ? " active" : ""), onclick: () => show(to, target) }, icon(iconName), h("span", { class: "clip" }, label));
+    const jump = (label, to, iconName, target = on) => uiJump({ label, icon: iconName, active: target === on && (at === to || at.startsWith(to + "/")), onclick: () => show(to, target) });
     const volumes = on ? [] : outerVolumes(listing);
     const others = machines ? (machinesUi.list?.machines ?? []).filter((m) => m.online) : [];
     if (mine) put(quick, mine.map((one) => jump(one.name, one.path, "share")));
-    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => h("button", { type: "button", class: "chip-btn" + (on === m.id ? " active" : ""), onclick: () => show("/", m.id) }, icon("server"), h("span", { class: "clip" }, m.name))));
+    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => uiJump({ label: m.name, icon: "server", active: on === m.id, onclick: () => show("/", m.id) })));
     quick.hidden = mine ? mine.length < 2 : !volumes.length && !others.length && !on;
     const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name), on));
-    put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
+    put(folders, inner.length ? inner.map((entry) => uiRow({ lead: { icon: "folder" }, name: entry.name, onclick: () => show(joinPath(at, entry.name)) })) : uiEmpty({ text: t("files.noFolders") }));
     confirm.disabled = !allowed(at, on) || (!!mine && listing.readOnly);
     newFolder.disabled = !!mine && listing.readOnly;
   };
@@ -1636,7 +1606,7 @@ function mediaDialog(entry) {
   const dir = state.files.path;
   let current = entry;
   let dialog;
-  const stage = h("div", { class: "stage" });
+  const stage = h("div", { class: "ui-viewer-stage" });
   const title = h("h2", { class: "clip" });
   const sub = h("p", { class: "muted small" });
   const step = (by) => {
@@ -1647,7 +1617,7 @@ function mediaDialog(entry) {
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
   // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
   let player = null;
-  const needs = h("p", { class: "muted small viewer-note", hidden: true });
+  const needs = h("p", { class: "muted small ui-viewer-note", hidden: true });
   const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, player ?? stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
   const show = (item) => {
     current = item;
@@ -1696,7 +1666,7 @@ async function textDialog(path) {
     return toast(errorText(e), "error");
   }
   let dialog;
-  const area = h("textarea", { class: "code", spellcheck: false, value: file.content, wrap: "off", "aria-label": path });
+  const area = uiCodeArea({ value: file.content, label: path });
   const error = h("p", { class: "error", role: "alert" });
   const save = button(t("settings.save"), {
     class: "primary",
@@ -1727,7 +1697,7 @@ async function textDialog(path) {
 // and what has arrived is not lost when one part fails.
 
 const UPLOAD_PART = 8 * 1024 * 1024;
-const uploadBox = h("div", { class: "card upload", hidden: true });
+const uploadBox = Object.assign(uiCard({ flush: true, cls: "ui-upload" }), { hidden: true });
 const uploads = { queue: [], running: false, xhr: null, cancelled: false, count: 0, done: 0, bytes: 0, sent: 0, started: 0, failed: [], conflicts: [] };
 
 /** Everything in a drop: files, and folders with what is in them */
@@ -1823,11 +1793,9 @@ function paintUpload() {
   const percent = total ? Math.min(100, Math.round((sent / total) * 100)) : 100;
   const seconds = (Date.now() - started) / 1000;
   const speed = seconds > 1 ? sent / seconds : 0;
-  const fill = h("i");
-  fill.style.width = percent + "%";
   put(uploadBox,
     icon("upload"),
-    h("div", { class: "grow stack-s" }, h("div", { class: "upload-line" }, h("strong", { class: "grow clip" }, t("files.uploading", { done: Math.min(done + 1, count), n: count })), h("span", { class: "muted small mono" }, uploads.retrying ? t("files.uploadRetrying") : [percent + "%", speed && `${bytes(speed)}/s`, speed && sent < total && duration(Math.max(60, (total - sent) / speed))].filter(Boolean).join(" · "))), h("div", { class: "bar" }, fill)),
+    h("div", { class: "grow stack-s" }, h("div", { class: "ui-upload-line" }, h("strong", { class: "grow clip" }, t("files.uploading", { done: Math.min(done + 1, count), n: count })), h("span", { class: "muted small mono" }, uploads.retrying ? t("files.uploadRetrying") : [percent + "%", speed && `${bytes(speed)}/s`, speed && sent < total && duration(Math.max(60, (total - sent) / speed))].filter(Boolean).join(" · "))), uiMeter(percent, { kind: "progress" })),
     h("button", { type: "button", class: "icon-btn", "aria-label": t("common.cancel"), title: t("common.cancel"), onclick: () => ((uploads.cancelled = true), (uploads.queue = []), uploads.xhr?.abort()) }, icon("x")),
   );
 }
@@ -1887,7 +1855,7 @@ function replaceDialog(conflicts) {
   const dialog = openDialog(
     "confirm",
     h("h2", null, t("files.replaceTitle", { n: conflicts.length })),
-    h("ul", { class: "paths small" }, conflicts.slice(0, 8).map((item) => h("li", null, item.sub ? `${item.sub}/${item.file.name}` : item.file.name)), conflicts.length > 8 && h("li", null, "…")),
+    uiProse(h("ul", { class: "small" }, conflicts.slice(0, 8).map((item) => h("li", null, item.sub ? `${item.sub}/${item.file.name}` : item.file.name)), conflicts.length > 8 && h("li", null, "…"))),
     h("footer", null, closeButton(() => dialog, t("files.skip")), button(t("files.replace"), { class: "danger", onclick: () => (dialog.close(), queueUploadOn(conflicts[0].machine, conflicts[0].dir, conflicts.map(({ file, sub }) => ({ file, sub })), true)) })),
   );
 }
@@ -1911,7 +1879,7 @@ function addStoreForm() {
   return h(
     "form",
     {
-      class: "stack-s add-store",
+      class: "stack-s",
       onsubmit: async (e) => {
         e.preventDefault();
         error.textContent = "";
@@ -1929,9 +1897,7 @@ function addStoreForm() {
         }
       },
     },
-    h("span", { class: "form-label" }, t("store.address")),
-    h("div", { class: "row-actions" }, input, go),
-    h("span", { class: "muted small" }, t("store.addHint")),
+    uiField(t("store.address"), uiLine([input, go]), t("store.addHint"), { group: true }),
     error,
   );
 }

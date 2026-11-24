@@ -27,50 +27,33 @@ function nameTargetWords(n) {
  * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
  */
 function namesCard() {
-  const body = h("div", { class: "stack" }, waitMark());
+  const body = h("div", null, uiEmpty({ size: "loading" }));
   const paint = async () => {
     let data;
     try {
       data = await api("GET", "/api/domains");
     } catch (e) {
-      return put(body, h("p", { class: "error" }, errorText(e)));
+      return put(body, h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: errorText(e) })));
     }
-    if (!data.names.length) return put(body, h("p", { class: "muted small" }, t("names.none")));
-    put(
-      body,
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          null,
-          h("thead", null, h("tr", null, h("th", null, t("names.col.name")), h("th", null, t("names.col.to")), h("th", null, t("names.col.access")), h("th"))),
-          h(
-            "tbody",
-            null,
-            data.names.map((n) =>
-              h(
-                "tr",
-                null,
-                h("td", null, nameUrl(n.label) ? h("a", { class: "link mono", href: nameUrl(n.label), target: "_blank", rel: "noopener noreferrer" }, nameUrl(n.label).replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label)),
-                h("td", null, h("div", null, nameTargetWords(n)), h("div", { class: "muted small mono" }, n.away ? t("error." + n.away) : `${n.https ? "https" : "http"}://${n.at}`)),
-                h("td", { class: "small" }, t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open")),
-                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => domainNameDialog(n, null, paint) }, "edit"))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (!data.names.length) return put(body, uiEmpty({ text: t("names.none") }));
+    const row = (n) => {
+      const url = nameUrl(n.label);
+      const access = t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open");
+      return {
+        onclick: () => domainNameDialog(n, null, paint),
+        cells: [
+          url ? h("a", { class: "link mono", href: url, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation() }, url.replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label),
+          uiCell({ name: nameTargetWords(n), sub: n.away ? null : h("span", { class: "mono" }, `${n.https ? "https" : "http"}://${n.at}`) }),
+          n.away ? uiState("bad", t("error." + n.away)) : h("span", { class: "small" }, access),
+          button(t("names.change"), { class: "small", onclick: (e) => (e.stopPropagation(), domainNameDialog(n, null, paint)) }, "edit"),
+        ],
+        sub: [nameTargetWords(n), access].join(" · "),
+      };
+    };
+    put(body, uiTable([{ label: t("names.col.name") }, { label: t("names.col.to") }, { label: t("names.col.access") }, { label: "" }], data.names.map(row)));
   };
   void paint();
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("names.title")), h("div", { class: "actions" }, button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus"))),
-    h("p", { class: "muted small" }, t(namesDomain() ? "names.lead" : "names.noDomain")),
-    body,
-  );
+  return uiCard({ title: t("names.title"), lead: t(namesDomain() ? "names.lead" : "names.noDomain"), flush: true, actions: button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus") }, body);
 }
 
 /**
@@ -81,50 +64,32 @@ const serverHost = () => (state.settings?.local?.enabled && state.settings.local
 
 /** Ports of this server passed on to a container, a guest, a machine or an address */
 function portsCard() {
-  const body = h("div", { class: "stack" }, waitMark());
+  const body = h("div", null, uiEmpty({ size: "loading" }));
   const paint = async () => {
     let data;
     try {
       data = await api("GET", "/api/domains");
     } catch (e) {
-      return put(body, h("p", { class: "error" }, errorText(e)));
+      return put(body, h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: errorText(e) })));
     }
-    if (!data.forwards.length) return put(body, h("p", { class: "muted small" }, t("ports.none")));
-    put(
-      body,
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          null,
-          h("thead", null, h("tr", null, h("th", null, t("ports.col.port")), h("th", null, t("names.col.to")), h("th", null, t("ports.col.how")), h("th"))),
-          h(
-            "tbody",
-            null,
-            data.forwards.map((f) =>
-              h(
-                "tr",
-                null,
-                h("td", null, h("div", { class: "mono strong" }, `${serverHost()}:${f.port}`), h("div", { class: "muted small" }, [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · "))),
-                h("td", null, h("div", null, t("names.kind." + f.kind, { name: f.title }) + " : " + f.to), h("div", { class: f.error || f.away ? "error small" : "muted small mono" }, f.error ? f.error : f.away ? t("error." + f.away) : f.by === "incus" ? t("ports.byIncus") : f.at)),
-                h("td", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
-                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => forwardDialog(f, null, paint) }, "edit"))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (!data.forwards.length) return put(body, uiEmpty({ text: t("ports.none") }));
+    const row = (f) => {
+      const to = t("names.kind." + f.kind, { name: f.title }) + " : " + f.to;
+      return {
+        onclick: () => forwardDialog(f, null, paint),
+        cells: [
+          uiCell({ name: h("span", { class: "mono" }, `${serverHost()}:${f.port}`), sub: [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · ") }),
+          uiCell({ name: to, sub: f.error || f.away ? null : h("span", { class: "mono" }, f.by === "incus" ? t("ports.byIncus") : f.at) }),
+          f.error ? uiState("bad", f.error) : f.away ? uiState("bad", t("error." + f.away)) : h("span", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
+          button(t("names.change"), { class: "small", onclick: (e) => (e.stopPropagation(), forwardDialog(f, null, paint)) }, "edit"),
+        ],
+        sub: to,
+      };
+    };
+    put(body, uiTable([{ label: t("ports.col.port") }, { label: t("names.col.to") }, { label: t("ports.col.how") }, { label: "" }], data.forwards.map(row)));
   };
   void paint();
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("ports.title")), h("div", { class: "actions" }, button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus"))),
-    h("p", { class: "muted small" }, t("ports.lead")),
-    body,
-  );
+  return uiCard({ title: t("ports.title"), lead: t("ports.lead"), flush: true, actions: button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus") }, body);
 }
 
 /** Opens a port of this server towards a target (or changes one) */
@@ -157,7 +122,7 @@ async function forwardDialog(existing, preset, after) {
     }
   };
   const remove = existing && button(t("names.remove"), {
-    class: "danger",
+    class: "danger-text",
     onclick: async () => {
       try {
         await api("DELETE", `/api/ports/${existing.port}`);
@@ -177,13 +142,13 @@ async function forwardDialog(existing, preset, after) {
       h("header", null, h("h2", { class: "grow" }, t(existing ? "ports.changeTitle" : "ports.addTitle")), closeX(() => dialog)),
       h("p", { class: "muted small" }, t("ports.dialogLead")),
       // the hints stand under the whole row: under one half they pushed its field out of line with the other
-      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.port"), h("span", { class: "port-at" }, h("span", { class: "muted mono clip" }, serverHost() + ":"), port)), field(t("ports.proto"), proto)), h("span", { class: "hint" }, t("ports.portHint"))),
+      uiField(null, uiFields(field(t("ports.port"), uiAffix(serverHost() + ":", port)), field(t("ports.proto"), proto)), t("ports.portHint"), { group: true }),
       field(t("names.to"), pick.select),
       pick.hostRow,
-      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.to"), to), field(t("ports.note"), note)), h("span", { class: "hint" }, t("ports.toHint"))),
+      uiField(null, uiFields(field(t("ports.to"), to), field(t("ports.note"), note)), t("ports.toHint"), { group: true }),
       outsideRow,
       error,
-      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
+      h("footer", null, remove, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
     ),
   );
   port.focus();
@@ -256,7 +221,7 @@ async function domainNameDialog(existing, preset, after) {
     }
   };
   const remove = existing && button(t("names.remove"), {
-    class: "danger",
+    class: "danger-text",
     onclick: async () => {
       try {
         await api("DELETE", `/api/domains/${existing.label}`);
@@ -274,15 +239,15 @@ async function domainNameDialog(existing, preset, after) {
       "form",
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t(existing ? "names.changeTitle" : "names.addTitle")), closeX(() => dialog)),
-      !d && h("p", { class: "banner small" }, t("names.noDomain")),
-      field(t("names.label"), h("span", { class: "web-address" }, label, d && h("span", { class: "muted mono" }, "." + d.domain)), t("names.labelHint")),
+      !d && uiNotice({ tone: "warn", text: t("names.noDomain") }),
+      field(t("names.label"), uiAffix(label, d && "." + d.domain), t("names.labelHint")),
       field(t("names.to"), to),
       hostRow,
       field(t("names.port"), port, t("names.portHint")),
       httpsRow,
       protectRow,
       error,
-      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
+      h("footer", null, remove, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
     ),
   );
   label.focus();
@@ -294,7 +259,7 @@ const DNS_UPSTREAMS = ["system", "quad9", "cloudflare", "google", "adguard", "cu
 
 /** Hata as the home's DNS server: on or off, where it listens, where the rest goes, the names it answers */
 function dnsSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
+  const box = h("div", { class: "stack" }, uiCard({}, uiEmpty({ size: "loading" })));
   let alive = true;
   cleanups.push(() => (alive = false));
   const load = async () => {
@@ -302,7 +267,7 @@ function dnsSection() {
       const d = await api("GET", "/api/dns");
       if (alive) paintDns(box, d, load);
     } catch (e) {
-      put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+      put(box, uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
     }
   };
   void load();
@@ -325,59 +290,65 @@ function paintDns(box, d, load) {
   const when = (ts) => (ts ? new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" }) : "—");
   const address = d.listening[0] ?? d.wanted[0] ?? location.hostname;
   // on or off, where it listens, and whether this device asks it
-  const status = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("dns.title"), " ", s.enabled && h("span", { class: "state " + (d.failed.length ? "restarting" : "running") }, t(d.failed.length ? "dns.partly" : "dns.working"))), h("div", { class: "actions" }, button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: s.enabled ? "" : "primary", onclick: (e) => (s.enabled ? confirmDnsOff(() => send({ enabled: false })) : send({ enabled: true }, e.currentTarget)) }, "power"))),
-    h("p", { class: "muted small" }, t("dns.lead")),
+  const status = uiCard(
+    {
+      title: t("dns.title"),
+      marks: s.enabled && uiState(d.failed.length ? "warn" : "ok", t(d.failed.length ? "dns.partly" : "dns.working")),
+      lead: t("dns.lead"),
+      actions: button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: "small" + (s.enabled ? "" : " primary"), onclick: (e) => (s.enabled ? confirmDnsOff(() => send({ enabled: false })) : send({ enabled: true }, e.currentTarget)) }, "power"),
+    },
     !s.enabled && h("ul", { class: "muted small" }, ["router", "names", "split", "wg"].map((k) => h("li", null, t("dns.what." + k)))),
-    s.enabled && d.listening.length > 0 && settingRow(t("dns.listening"), "", h("span", { class: "mono" }, d.listening.map((a) => `${a}:${d.port}`).join(", "))),
-    ...d.failed.map((f) => h("p", { class: "banner small" }, t(f.holder ? "dns.failedHolder" : "dns.failed", { address: f.address, holder: f.holder, error: f.error }))),
-    s.enabled && h("p", { class: d.you.seen ? "banner small ok" : "banner small" }, t(d.you.seen ? "dns.youUse" : "dns.youDont", { address: d.you.address, when: when(d.you.seen) })),
-    h("p", { class: "muted small" }, t("dns.blockLead"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("settings.adblock"))),
-    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.routerTitle")), h("p", { class: "muted small" }, t("dns.router", { address })), h("p", { class: "muted small" }, t("dns.routerOne"))),
+    ...d.failed.map((f) => uiNotice({ tone: "warn", text: t(f.holder ? "dns.failedHolder" : "dns.failed", { address: f.address, holder: f.holder, error: f.error }) })),
+    s.enabled && uiNotice({ tone: d.you.seen ? "ok" : "warn", text: t(d.you.seen ? "dns.youUse" : "dns.youDont", { address: d.you.address, when: when(d.you.seen) }) }),
+    ...uiFacts([s.enabled && d.listening.length > 0 && [t("dns.listening"), h("span", { class: "mono" }, d.listening.map((a) => `${a}:${d.port}`).join(", "))]]),
+    s.enabled && uiNotice({ tone: "info", title: t("dns.routerTitle"), text: [t("dns.router", { address }), t("dns.routerOne")].join(" ") }),
+    h("p", { class: "muted small" }, t("dns.blockLead"), " ", h("a", { class: "link", href: "#/network/adblock" }, t("settings.adblock"))),
     error,
   );
   // where the questions not answered here go
-  const choice = h("select", null, DNS_UPSTREAMS.map((u) => h("option", { value: u, selected: s.upstream === u }, t("dns.up." + u))));
+  const choice = h("select", { "aria-label": t("dns.upChoice") }, DNS_UPSTREAMS.map((u) => h("option", { value: u, selected: s.upstream === u }, t("dns.up." + u))));
   const [doh, dohRow] = tickRow(t("dns.doh"), t("dns.dohHint"), s.doh);
   const servers = h("textarea", { rows: 3, class: "mono", placeholder: "9.9.9.9\nhttps://dns.example/dns-query", spellcheck: false }, s.servers.join("\n"));
-  const serversRow = field(t("dns.servers"), servers, t("dns.serversHint"));
+  const serversRow = uiSetting({ name: t("dns.servers"), explain: t("dns.serversHint"), control: servers, wide: true });
   const shape = () => {
     dohRow.hidden = ["system", "custom"].includes(choice.value);
     serversRow.hidden = choice.value !== "custom";
   };
   choice.addEventListener("change", shape);
   shape();
-  const upstream = h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("dns.upTitle")),
-    h("p", { class: "muted small" }, t("dns.upLead")),
-    field(t("dns.upChoice"), choice, choice.value === "system" ? t("dns.upSystem", { list: d.system.join(", ") || "—" }) : ""),
+  const upRow = (u) => {
+    const bad = u.fail > u.ok;
+    return uiRow({
+      lead: { icon: bad ? "x" : u.ok ? "check" : "clock", tone: bad ? "bad" : u.ok ? "ok" : null },
+      name: h("span", { class: "mono" }, u.kind === "doh" ? u.url : u.kind === "dot" ? `${u.host} · TLS (${u.name})` : u.host),
+      sub: bad ? t("dns.upFailed", { error: u.error }) : u.ok ? t("dns.upOk", { when: when(u.ok) }) : t("dns.upNotYet"),
+    });
+  };
+  const upstream = uiCard(
+    { title: t("dns.upTitle"), lead: t("dns.upLead") },
+    d.looping.length > 0 && uiNotice({ tone: "warn", text: t("dns.looping", { list: d.looping.join(", ") }) }),
+    uiSetting({ name: t("dns.upChoice"), explain: choice.value === "system" ? t("dns.upSystem", { list: d.system.join(", ") || "—" }) : null, control: choice }),
     dohRow,
     serversRow,
-    h("div", { class: "actions" }, button(t("settings.save"), { class: "primary", onclick: (e) => send({ upstream: choice.value, doh: doh.checked, servers: servers.value.split(/[\s,]+/).filter(Boolean) }, e.currentTarget) })),
-    d.looping.length > 0 && h("p", { class: "banner small" }, t("dns.looping", { list: d.looping.join(", ") })),
-    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.upNow")), ...d.upstreams.map((u) => h("div", { class: "activity-item" }, icon(u.fail > u.ok ? "x" : u.ok ? "check" : "clock", u.fail > u.ok ? "danger" : u.ok ? "ok" : ""), h("div", { class: "grow" }, h("div", { class: "mono" }, u.kind === "doh" ? u.url : u.kind === "dot" ? `${u.host} · TLS (${u.name})` : u.host), h("div", { class: "muted small" }, u.fail > u.ok ? t("dns.upFailed", { error: u.error }) : u.ok ? t("dns.upOk", { when: when(u.ok) }) : t("dns.upNotYet")))))),
+    uiFoot(button(t("settings.save"), { class: "primary", onclick: (e) => send({ upstream: choice.value, doh: doh.checked, servers: servers.value.split(/[\s,]+/).filter(Boolean) }, e.currentTarget) })),
+    s.enabled && d.upstreams.length > 0 && h("div", { class: "ui-band-plain" }, t("dns.upNow")),
+    s.enabled && d.upstreams.length > 0 && uiRowsIn(d.upstreams.map(upRow)),
   );
   // the names answered here
-  const name = h("input", { class: "mono", placeholder: "printer.lan", spellcheck: false, autocapitalize: "none" });
-  const type = h("select", null, h("option", { value: "A" }, "IPv4 (A)"), h("option", { value: "AAAA" }, "IPv6 (AAAA)"));
-  const value = h("input", { class: "mono", placeholder: "192.168.1.40", spellcheck: false });
+  const name = h("input", { class: "mono", placeholder: "printer.lan", spellcheck: false, autocapitalize: "none", "aria-label": t("names.col.name") });
+  const type = h("select", { "aria-label": "Type" }, h("option", { value: "A" }, "IPv4 (A)"), h("option", { value: "AAAA" }, "IPv6 (AAAA)"));
+  const value = h("input", { class: "mono", placeholder: "192.168.1.40", spellcheck: false, "aria-label": t("names.col.to") });
   const recError = h("p", { class: "error", role: "alert" });
-  const names = h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("dns.namesTitle")),
-    h("p", { class: "muted small" }, t("dns.namesLead")),
-    ...d.domains.map((dom) => settingRow(`${dom}, *.${dom}`, t("dns.ownDomain"), h("span", { class: "muted" }, t("dns.toHata")))),
-    d.domains.length === 0 && h("p", { class: "muted small" }, t("dns.noDomains")),
-    ...s.records.map((r) => h("div", { class: "activity-item" }, icon("globe"), h("div", { class: "grow" }, h("div", { class: "mono" }, r.name), h("div", { class: "muted small mono" }, `${r.type} ${r.value}`)), button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: async () => paintDns(box, await api("DELETE", `/api/dns/records/${r.type}/${r.name}`), load) }, "trash"))),
+  const removeRecord = async (r) => paintDns(box, await api("DELETE", `/api/dns/records/${r.type}/${r.name}`), load);
+  const names = uiCard(
+    { title: t("dns.namesTitle"), lead: t("dns.namesLead"), flush: true },
+    ...d.domains.map((dom) => uiRow({ lead: { icon: "home" }, name: `${dom}, *.${dom}`, sub: t("dns.ownDomain"), value: t("dns.toHata") })),
+    d.domains.length === 0 && uiEmpty({ text: t("dns.noDomains") }),
+    ...s.records.map((r) => uiRow({ lead: { icon: "globe" }, name: h("span", { class: "mono" }, r.name), sub: h("span", { class: "mono" }, `${r.type} ${r.value}`), more: [{ label: t("names.remove"), icon: "trash", danger: true, run: () => removeRecord(r) }] })),
     h(
       "form",
       {
-        class: "stack-s",
+        class: "ui-inset stack-s",
         onsubmit: async (e) => {
           e.preventDefault();
           recError.textContent = "";
@@ -388,19 +359,18 @@ function paintDns(box, d, load) {
           }
         },
       },
-      h("div", { class: "web-address" }, name, type, value, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
+      uiAffix(name, type, value, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
       recError,
     ),
   );
   // how it is used
   const st = d.stats;
-  const usage = s.enabled && h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("dns.usageTitle")), button(t("dns.refresh"), { class: "small", onclick: () => load() }, "refresh")),
-    h("p", { class: "muted small" }, t("dns.usage", { queries: st.queries, own: st.own, cached: st.cached, upstream: st.upstream, failed: st.failed, refused: st.refused, kept: st.kept })),
-    d.clients.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("dns.col.device")), h("th", null, t("dns.col.queries")), h("th", null, t("dns.col.last")))), h("tbody", null, d.clients.map((c) => h("tr", null, h("td", { class: "mono" }, c.address), h("td", null, String(c.count)), h("td", null, when(c.last))))))),
-  );
+  const usage =
+    s.enabled &&
+    uiCard(
+      { title: t("dns.usageTitle"), lead: t("dns.usage", { queries: st.queries, own: st.own, cached: st.cached, upstream: st.upstream, failed: st.failed, refused: st.refused, kept: st.kept }), flush: true, actions: button(t("dns.refresh"), { class: "small", onclick: () => load() }, "refresh") },
+      d.clients.length > 0 && uiTable([{ label: t("dns.col.device") }, { label: t("dns.col.queries"), num: true }, { label: t("dns.col.last") }], d.clients.map((c) => ({ cells: [h("span", { class: "mono" }, c.address), String(c.count), when(c.last)], sub: `${c.count} · ${when(c.last)}` })), { height: 44 }),
+    );
   put(box, status, upstream, names, usage);
 }
 
@@ -416,13 +386,13 @@ function confirmDnsOff(go) {
 
 // --- Blocking by name ---------------------------------------------------------------------------
 
-const adblockUi = { q: "", outcome: "", client: "", check: null };
+const adblockUi = { q: "", outcome: "", client: "", check: null, syntax: false };
 const PAUSES = [5, 30, 60, 240, 1440];
 
 const blockUntil = (ts) => new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" });
 
 function adblockSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
+  const box = h("div", { class: "stack" }, uiCard({}, uiEmpty({ size: "loading" })));
   let alive = true;
   let timer = 0;
   cleanups.push(() => ((alive = false), clearTimeout(timer)));
@@ -436,7 +406,7 @@ function adblockSection() {
       // a list being downloaded: its numbers are on the way
       if (d.lists.some((l) => l.busy) || (d.settings.enabled && d.lists.some((l) => l.enabled && !l.counts && !l.error))) timer = setTimeout(load, 3000);
     } catch (e) {
-      put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+      put(box, uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
     }
   };
   void load();
@@ -460,33 +430,29 @@ function paintAdblock(box, d, load) {
   const share = d.day.questions ? Math.round((d.day.blocked / d.day.questions) * 100) : 0;
   const mode = h("select", { onchange: () => act("PUT", "/api/dns/block", { mode: mode.value }) }, ["zero", "nxdomain"].map((m) => h("option", { value: m, selected: s.mode === m }, t("adblock.mode." + m))));
   const pauseMenu = (el) => menuAt(underButton(el), null, PAUSES.map((minutes) => ({ label: t("adblock.pauseFor", { what: pauseWords(minutes) }), icon: "clock", run: () => act("POST", "/api/dns/block/pause", { minutes }) })));
-  const status = h(
-    "section",
-    { class: "card pad stack" },
-    h(
-      "div",
-      { class: "section-head" },
-      h("h2", null, t("adblock.title"), " ", s.enabled && h("span", { class: "state " + (d.paused ? "restarting" : "running") }, d.paused ? t("adblock.pausedUntil", { when: blockUntil(s.pausedUntil) }) : t("adblock.working"))),
-      h(
-        "div",
-        { class: "actions" },
-        s.enabled && (d.paused ? button(t("adblock.resume"), { class: "primary", onclick: (e) => act("POST", "/api/dns/block/pause", { minutes: 0 }, e.currentTarget) }, "power") : button(t("adblock.pause"), { onclick: (e) => pauseMenu(e.currentTarget) }, "clock")),
-        button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: s.enabled ? "" : "primary", onclick: (e) => act("PUT", "/api/dns/block", { enabled: !s.enabled }, e.currentTarget) }, "power"),
-      ),
-    ),
-    h("p", { class: "muted small" }, t("adblock.lead")),
-    s.enabled && d.lists.length === 0 && s.rules.length === 0 && h("p", { class: "banner small" }, t("adblock.nothingYet")),
+  const status = uiCard(
+    {
+      title: t("adblock.title"),
+      marks: s.enabled && uiState(d.paused ? "warn" : "ok", d.paused ? t("adblock.pausedUntil", { when: blockUntil(s.pausedUntil) }) : t("adblock.working")),
+      lead: t("adblock.lead"),
+      actions: [
+        s.enabled && (d.paused ? button(t("adblock.resume"), { class: "small primary", onclick: (e) => act("POST", "/api/dns/block/pause", { minutes: 0 }, e.currentTarget) }, "power") : button(t("adblock.pause"), { class: "small", onclick: (e) => pauseMenu(e.currentTarget) }, "clock")),
+        button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: "small" + (s.enabled ? "" : " primary"), onclick: (e) => act("PUT", "/api/dns/block", { enabled: !s.enabled }, e.currentTarget) }, "power"),
+      ].filter(Boolean),
+    },
+    s.enabled && d.lists.length === 0 && s.rules.length === 0 && uiNotice({ tone: "warn", text: t("adblock.nothingYet") }),
     h("div", { id: "adblock-serving" }),
     s.enabled && d.day.questions > 0 && h("p", null, t("adblock.today", { questions: d.day.questions, blocked: d.day.blocked, share })),
-    d.hours.length >= 2 && lineChart(d.hours.map((p) => ({ t: p.at, ...p })), [{ cls: "s1", label: t("adblock.chart.questions"), value: (p) => p.questions }, { cls: "s2", label: t("adblock.chart.blocked"), value: (p) => p.blocked }], { fmt: (v) => String(Math.round(v)), label: t("adblock.chart.title"), height: 130, head: false }),
-    settingRow(t("adblock.modeTitle"), t("adblock.modeHint"), mode),
-    settingRow(t("adblock.memory"), t("adblock.memoryHint", { process: bytes(d.memory.process) }), h("span", { class: "mono" }, bytes(d.memory.lists))),
+    d.hours.length >= 2 && lineChart(d.hours.map((p) => ({ t: p.at, ...p })), [{ colour: 1, label: t("adblock.chart.questions"), value: (p) => p.questions }, { colour: 2, label: t("adblock.chart.blocked"), value: (p) => p.blocked }], { fmt: (v) => String(Math.round(v)), label: t("adblock.chart.title"), height: 130, head: false }),
+    uiSetting({ name: t("adblock.modeTitle"), explain: t("adblock.modeHint"), control: mode }),
+    ...uiFacts([[t("adblock.memory"), h("span", { class: "mono", title: t("adblock.memoryHint", { process: bytes(d.memory.process) }) }, bytes(d.memory.lists))]]),
     error,
   );
   void api("GET", "/api/dns").then((dns) => {
     const at = status.querySelector("#adblock-serving");
-    if (at && s.enabled && !dns.settings.enabled) put(at, h("p", { class: "banner small" }, t("adblock.serverOff"), " ", h("a", { class: "link", href: "#/settings/dns" }, t("adblock.serverOpen"))));
-    else if (at && s.enabled && !dns.clients.length) put(at, h("p", { class: "banner small" }, t("adblock.nobodyAsks"), " ", h("a", { class: "link", href: "#/settings/dns" }, t("adblock.serverOpen"))));
+    const open = h("a", { class: "btn small", href: "#/network/dns" }, t("adblock.serverOpen"));
+    if (at && s.enabled && !dns.settings.enabled) put(at, uiNotice({ tone: "warn", text: t("adblock.serverOff"), action: open }));
+    else if (at && s.enabled && !dns.clients.length) put(at, uiNotice({ tone: "warn", text: t("adblock.nobodyAsks"), action: open }));
   }).catch(() => {});
   // the lists
   const updated = (l) => (l.updated ? new Date(l.updated).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -497,35 +463,40 @@ function paintAdblock(box, d, load) {
     return [t("adblock.list.names", { n: c.names.toLocaleString(state.lang) }), c.rules > 0 && t("adblock.list.rules", { n: c.rules.toLocaleString(state.lang) }), (c.cosmetic + c.notDns) > 0 && t("adblock.list.notDns", { n: (c.cosmetic + c.notDns).toLocaleString(state.lang) }), c.broken > 0 && t("adblock.list.broken", { n: c.broken.toLocaleString(state.lang) }), c.overLimit > 0 && t("adblock.list.over", { n: c.overLimit.toLocaleString(state.lang) }), l.memory > 0 && bytes(l.memory), t("adblock.list.updated", { when: updated(l) })].filter(Boolean).join(" · ");
   };
   const listRow = (l) =>
-    h(
-      "div",
-      { class: "activity-item adblock-list" },
-      h("input", { type: "checkbox", checked: l.enabled, "aria-label": l.name, onchange: (e) => act("PATCH", `/api/dns/block/lists/${l.id}`, { enabled: e.currentTarget.checked }, e.currentTarget) }),
-      h("div", { class: "grow" }, h("div", null, h("strong", null, l.name), l.allow && h("span", { class: "pill" }, t("adblock.list.exceptions"))), h("div", { class: "muted small adblock-url" }, l.url), h("div", { class: "muted small" }, countsLine(l)), l.error && h("div", { class: "error small" }, t("adblock.list.failed", { error: l.error }))),
-      button("", { class: "small ghost", disabled: l.busy, title: t("adblock.list.refresh"), "aria-label": t("adblock.list.refresh"), onclick: (e) => act("POST", `/api/dns/block/lists/${l.id}/refresh`, undefined, e.currentTarget) }, "refresh"),
-      button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: () => confirmAction({ title: t("adblock.list.removeTitle", { name: l.name }), lead: t("adblock.list.removeLead"), label: t("names.remove"), run: () => act("DELETE", `/api/dns/block/lists/${l.id}`) }) }, "trash"),
-    );
-  const [auto, autoRow] = tickRow(t("adblock.update"), t("adblock.updateHint"), s.update);
+    uiRow({
+      lead: { check: h("input", { type: "checkbox", checked: l.enabled, "aria-label": l.name, onchange: (e) => act("PATCH", `/api/dns/block/lists/${l.id}`, { enabled: e.currentTarget.checked }, e.currentTarget) }) },
+      name: h("span", null, l.name, l.allow && " ", l.allow && uiTag(t("adblock.list.exceptions"))),
+      sub: [l.url, countsLine(l)].filter(Boolean).join(" · "),
+      title: [l.url, countsLine(l)].filter(Boolean).join("\n"),
+      state: l.error ? uiState("bad", t("adblock.list.failed", { error: l.error })) : l.busy ? uiState("info", t("adblock.list.downloading")) : null,
+      more: [
+        { label: t("adblock.list.refresh"), icon: "refresh", off: l.busy, run: () => act("POST", `/api/dns/block/lists/${l.id}/refresh`) },
+        { label: t("names.remove") + "…", icon: "trash", danger: true, run: () => confirmAction({ title: t("adblock.list.removeTitle", { name: l.name }), lead: t("adblock.list.removeLead"), label: t("names.remove"), run: () => act("DELETE", `/api/dns/block/lists/${l.id}`) }) },
+      ],
+    });
+  const [auto, autoRow] = switchRow(t("adblock.update"), t("adblock.updateHint"), s.update);
   auto.addEventListener("change", () => act("PUT", "/api/dns/block", { update: auto.checked }));
-  const lists = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("adblock.lists")), h("div", { class: "actions" }, d.lists.length > 0 && button(t("adblock.list.refreshAll"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/refresh", undefined, e.currentTarget) }, "refresh"), button(t("adblock.list.add"), { class: "small primary", onclick: () => addBlockListDialog(d, (fresh) => (paintAdblock(box, fresh, load), load())) }, "plus"))),
-    d.lists.length ? h("div", { class: "stack-s" }, d.lists.map(listRow)) : h("p", { class: "muted small" }, t("adblock.list.none")),
-    d.lists.length > 0 && h("p", { class: "muted small" }, t("adblock.list.total", { n: d.names.toLocaleString(state.lang) })),
-    autoRow,
+  const lists = uiCard(
+    {
+      title: t("adblock.lists"),
+      count: d.lists.length || null,
+      lead: d.lists.length > 0 ? t("adblock.list.total", { n: d.names.toLocaleString(state.lang) }) : null,
+      flush: true,
+      actions: [d.lists.length > 0 && button(t("adblock.list.refreshAll"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/refresh", undefined, e.currentTarget) }, "refresh"), button(t("adblock.list.add"), { class: "small primary", onclick: () => addBlockListDialog(d, (fresh) => (paintAdblock(box, fresh, load), load())) }, "plus")].filter(Boolean),
+    },
+    d.lists.length ? d.lists.map(listRow) : uiEmpty({ text: t("adblock.list.none") }),
+    h("div", { class: "ui-inset" }, autoRow),
   );
   // the person's own rules
   const rules = h("textarea", { rows: Math.min(14, Math.max(5, s.rules.length + 1)), class: "mono", spellcheck: false, autocapitalize: "none", placeholder: "||ads.example.com^\n@@||good.example.com^\n/^ad[0-9]+\\./\n||kids.example^$client=192.168.1.20" }, s.rules.join("\n"));
-  const own = h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("adblock.own")),
-    h("p", { class: "muted small" }, t("adblock.ownLead")),
+  const syntax = h("ul", { class: "muted small", hidden: !adblockUi.syntax }, ["sub", "exact", "allow", "wild", "regex", "important", "dnstype", "client", "rewrite", "badfilter"].map((k) => h("li", null, h("code", null, t("adblock.syntax." + k + ".code")), " — ", t("adblock.syntax." + k))));
+  const own = uiCard(
+    { title: t("adblock.own"), lead: t("adblock.ownLead") },
+    ...d.own.trouble.map((x) => uiNotice({ tone: "warn", text: [h("code", null, x.line), " — ", t("adblock.own." + x.why)] })),
     rules,
-    ...d.own.trouble.map((x) => h("p", { class: "banner small" }, h("code", null, x.line), " — ", t("adblock.own." + x.why))),
-    h("details", { class: "muted small" }, h("summary", null, t("adblock.syntax")), h("ul", null, ["sub", "exact", "allow", "wild", "regex", "important", "dnstype", "client", "rewrite", "badfilter"].map((k) => h("li", null, h("code", null, t("adblock.syntax." + k + ".code")), " — ", t("adblock.syntax." + k))))),
-    h("div", { class: "actions" }, button(t("settings.save"), { class: "primary", onclick: (e) => { const go = e.currentTarget; rules.blur(); return act("PUT", "/api/dns/block/rules", { text: rules.value }, go); } })),
+    uiEmpty({ text: t("adblock.syntax"), action: button(t(adblockUi.syntax ? "fills.largestHide" : "ui.showMore"), { class: "small quiet", onclick: (e) => ((adblockUi.syntax = !adblockUi.syntax), (syntax.hidden = !adblockUi.syntax), (e.currentTarget.lastChild.textContent = t(adblockUi.syntax ? "fills.largestHide" : "ui.showMore"))) }, "info") }),
+    syntax,
+    uiFoot(button(t("settings.save"), { class: "primary", onclick: (e) => { const go = e.currentTarget; rules.blur(); return act("PUT", "/api/dns/block/rules", { text: rules.value }, go); } })),
   );
   // what was asked, and what a name would get
   const logBody = h("div");
@@ -541,7 +512,7 @@ function paintAdblock(box, d, load) {
   const search = h("input", { type: "search", placeholder: t("adblock.log.search"), value: adblockUi.q, oninput: () => ((adblockUi.q = search.value), void paintLog()) });
   const outcome = h("select", { onchange: () => ((adblockUi.outcome = outcome.value), void paintLog()) }, ["", "blocked", "allowed", "rewritten", "passed", "own", "failed"].map((o) => h("option", { value: o, selected: adblockUi.outcome === o }, t("adblock.log.only." + (o || "all")))));
   const device = h("select", { onchange: () => ((adblockUi.client = device.value), void paintLog()) }, h("option", { value: "" }, t("adblock.log.allDevices")), d.devices.map((x) => h("option", { value: x.address, selected: adblockUi.client === x.address }, x.name ? `${x.name} (${x.address})` : x.address)));
-  const [keep, keepRow] = tickRow(t("adblock.log.keep"), t("adblock.log.keepHint"), s.log);
+  const [keep, keepRow] = switchRow(t("adblock.log.keep"), t("adblock.log.keepHint"), s.log);
   keep.addEventListener("change", () => act("PUT", "/api/dns/block", { log: keep.checked }));
   const checkName = h("input", { class: "mono", placeholder: "ads.example.com", spellcheck: false, autocapitalize: "none" });
   const checkOut = h("div");
@@ -549,43 +520,44 @@ function paintAdblock(box, d, load) {
     e.preventDefault();
     try {
       const r = await api("GET", `/api/dns/block/check?${new URLSearchParams({ name: checkName.value.trim() })}`);
-      put(checkOut, h("p", { class: "banner small" + (r.hit?.action === "block" ? "" : " ok") }, r.hit ? t("adblock.check." + r.hit.action, { name: r.name, rule: r.hit.rule, source: r.hit.source === "own" ? t("adblock.own") : (r.hit.listName ?? "") }) : t("adblock.check.none", { name: r.name })));
+      put(checkOut, uiNotice({ tone: r.hit?.action === "block" ? "warn" : "ok", text: r.hit ? t("adblock.check." + r.hit.action, { name: r.name, rule: r.hit.rule, source: r.hit.source === "own" ? t("adblock.own") : (r.hit.listName ?? "") }) : t("adblock.check.none", { name: r.name }) }));
     } catch (err) {
-      put(checkOut, h("p", { class: "error" }, errorText(err)));
+      put(checkOut, uiNotice({ tone: "bad", text: errorText(err) }));
     }
   };
-  const logCard = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("adblock.log")), button(t("dns.refresh"), { class: "small", onclick: () => void paintLog() }, "refresh")),
-    h("form", { class: "web-address", onsubmit: runCheck }, checkName, h("button", { class: "btn" }, icon("search"), t("adblock.check"))),
-    checkOut,
-    h("div", { class: "adblock-filter" }, search, outcome, device),
+  const logCard = uiCard(
+    { title: t("adblock.log"), flush: true, actions: button(t("dns.refresh"), { class: "small", onclick: () => void paintLog() }, "refresh") },
+    h("div", { class: "ui-inset stack-s" }, h("form", { onsubmit: runCheck }, uiAffix(checkName, h("button", { class: "btn" }, icon("search"), t("adblock.check")))), checkOut, uiLine([search, outcome, device])),
     logBody,
-    keepRow,
+    h("div", { class: "ui-inset" }, keepRow),
   );
   void paintLog();
   // most blocked, devices
-  const top = d.top.length > 0 && h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("adblock.top")),
-    h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("adblock.col.name")), h("th", null, t("adblock.col.times")), h("th", null, ""))), h("tbody", null, d.top.map((x) => h("tr", null, h("td", { class: "mono" }, x.name), h("td", null, String(x.count)), h("td", null, button(t("adblock.allow"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/name", { name: x.name, allow: true }, e.currentTarget) })))))),
-  ));
-  const newAddress = h("input", { class: "mono", placeholder: "192.168.1.20", spellcheck: false });
-  const newName = h("input", { placeholder: t("adblock.device.namePlace") });
-  const devices = h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("adblock.devices")),
-    h("p", { class: "muted small" }, t("adblock.devicesLead")),
-    d.devices.length
-      ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("dns.col.device")), h("th", null, t("dns.col.queries")), h("th", null, t("adblock.col.blocked")), h("th", null, t("adblock.col.on")), h("th", null, ""))), h("tbody", null, d.devices.map((x) => h("tr", null, h("td", null, h("strong", null, x.name || "—"), h("div", { class: "muted small mono" }, x.address)), h("td", null, String(x.count)), h("td", null, String(x.blocked)), h("td", null, h("input", { type: "checkbox", checked: x.on, "aria-label": t("adblock.col.on"), onchange: (e) => act("PUT", "/api/dns/block/device", { address: x.address, name: x.name, on: e.currentTarget.checked }, e.currentTarget) })), h("td", null, button(t("adblock.device.name"), { class: "small", onclick: () => blockDeviceDialog(x, (name) => act("PUT", "/api/dns/block/device", { address: x.address, name, on: x.on })) })))))))
-      : h("p", { class: "muted small" }, t("adblock.devicesNone")),
-    h("form", { class: "web-address", onsubmit: (e) => { e.preventDefault(); void act("PUT", "/api/dns/block/device", { address: newAddress.value.trim(), name: newName.value.trim(), on: true }); } }, newAddress, newName, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
+  const top =
+    d.top.length > 0 &&
+    uiCard(
+      { title: t("adblock.top"), flush: true },
+      uiTable([{ label: t("adblock.col.name") }, { label: t("adblock.col.times"), num: true }, { label: "" }], d.top.map((x) => ({ cells: [h("span", { class: "mono" }, x.name), String(x.count), button(t("adblock.allow"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/name", { name: x.name, allow: true }, e.currentTarget) }, "check")], sub: String(x.count) })), { height: 44 }),
+    );
+  const newAddress = h("input", { class: "mono", placeholder: "192.168.1.20", spellcheck: false, "aria-label": t("dns.col.device") });
+  const newName = h("input", { placeholder: t("adblock.device.namePlace"), "aria-label": t("adblock.device.name") });
+  const deviceRow = (x) => ({
+    cells: [
+      uiCell({ name: x.name || "—", sub: h("span", { class: "mono" }, x.address) }),
+      String(x.count),
+      String(x.blocked),
+      uiSwitch({ on: x.on, label: t("adblock.col.on"), onchange: (on) => act("PUT", "/api/dns/block/device", { address: x.address, name: x.name, on }) }),
+      button(t("adblock.device.name"), { class: "small", onclick: () => blockDeviceDialog(x, (name) => act("PUT", "/api/dns/block/device", { address: x.address, name, on: x.on })) }, "edit"),
+    ],
+    sub: `${x.address} · ${x.count} / ${x.blocked}`,
+  });
+  const devices = uiCard(
+    { title: t("adblock.devices"), lead: t("adblock.devicesLead"), flush: true },
+    d.devices.length ? uiTable([{ label: t("dns.col.device") }, { label: t("dns.col.queries"), num: true }, { label: t("adblock.col.blocked"), num: true }, { label: t("adblock.col.on") }, { label: "" }], d.devices.map(deviceRow)) : uiEmpty({ text: t("adblock.devicesNone") }),
+    h("form", { class: "ui-inset", onsubmit: (e) => { e.preventDefault(); void act("PUT", "/api/dns/block/device", { address: newAddress.value.trim(), name: newName.value.trim(), on: true }); } }, uiAffix(newAddress, newName, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord")))),
   );
   // moving in
-  const moveIn = h("section", { class: "card pad stack" }, h("h2", null, t("adblock.import")), h("p", { class: "muted small" }, t("adblock.importLead")));
+  const moveIn = uiCard({ title: t("adblock.import"), lead: t("adblock.importLead") });
   const planError = h("p", { class: "error", role: "alert" });
   const planFrom = async (promise) => {
     planError.textContent = "";
@@ -609,10 +581,10 @@ function paintAdblock(box, d, load) {
       }));
     },
   });
-  const appsBox = h("div", { class: "stack-s" });
-  moveIn.append(h("div", { class: "actions" }, button(t("adblock.importFile"), { onclick: () => picked.click() }, "upload"), picked), appsBox, planError);
+  const appsBox = uiRowsIn();
+  moveIn.append(uiLine([button(t("adblock.importFile"), { onclick: () => picked.click() }, "upload"), picked]), appsBox, planError);
   void api("GET", "/api/dns/block/import/apps").then((apps) => {
-    put(appsBox, ...apps.map((a) => h("div", { class: "activity-item" }, icon("box"), h("div", { class: "grow" }, h("strong", null, a.title || a.name), h("div", { class: "muted small" }, t(a.found ? "adblock.importApp" : "adblock.importAppNoFile", { kind: a.kind === "pihole" ? "Pi-hole" : "AdGuard Home" }))), a.found && button(t("adblock.importTake"), { class: "small", onclick: () => planFrom(api("POST", "/api/dns/block/import/app", { name: a.name })) }, "download"))));
+    put(appsBox, ...apps.map((a) => uiRow({ lead: { icon: "box" }, name: a.title || a.name, sub: t(a.found ? "adblock.importApp" : "adblock.importAppNoFile", { kind: a.kind === "pihole" ? "Pi-hole" : "AdGuard Home" }), action: a.found && button(t("adblock.importTake"), { class: "small", onclick: () => planFrom(api("POST", "/api/dns/block/import/app", { name: a.name })) }, "download") })));
   }).catch(() => {});
   put(box, status, lists, own, logCard, top, devices, moveIn);
 }
@@ -620,35 +592,25 @@ function paintAdblock(box, d, load) {
 const pauseWords = (minutes) => (minutes < 60 ? t("adblock.minutes", { n: minutes }) : t("adblock.hours", { n: minutes / 60 }));
 
 function paintBlockLog(body, list, d, rule) {
-  if (!list.length) return void put(body, h("p", { class: "muted small" }, t(d.settings.log ? "adblock.log.empty" : "adblock.log.off")));
+  if (!list.length) return void put(body, uiEmpty({ text: t(d.settings.log ? "adblock.log.empty" : "adblock.log.off") }));
   const nameOf = (address) => d.devices.find((x) => x.address === address)?.name || address;
   const typeName = { 1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV", 64: "SVCB", 65: "HTTPS" };
+  const tone = { blocked: "bad", failed: "bad", allowed: "info", rewritten: "info", passed: "off", own: "off" };
   put(
     body,
-    h(
-      "div",
-      { class: "table-wrap adblock-log" },
-      h(
-        "table",
-        null,
-        h("thead", null, h("tr", null, h("th", null, t("dns.col.last")), h("th", null, t("dns.col.device")), h("th", null, t("adblock.col.name")), h("th", null, t("adblock.col.outcome")), h("th", null, ""))),
-        h(
-          "tbody",
-          null,
-          list.map((e) => {
-            const cut = e.outcome === "blocked";
-            return h(
-              "tr",
-              null,
-              h("td", { class: "small" }, new Date(e.at).toLocaleTimeString(state.lang)),
-              h("td", { class: "small" }, nameOf(e.client)),
-              h("td", null, h("span", { class: "mono" }, e.name), " ", h("span", { class: "muted small" }, typeName[e.type] ?? String(e.type))),
-              h("td", null, h("span", { class: "adblock-outcome " + e.outcome }, t("adblock.outcome." + e.outcome)), e.rule && h("div", { class: "muted small adblock-why" }, e.source === "own" ? t("adblock.own") : (e.listName ?? ""), " ", h("span", { class: "mono" }, e.rule))),
-              h("td", null, cut ? button(t("adblock.allow"), { class: "small", onclick: () => rule(e.name, true) }) : e.outcome === "passed" || e.outcome === "allowed" ? button(t("adblock.block"), { class: "small", onclick: () => rule(e.name, false) }) : null),
-            );
-          }),
-        ),
-      ),
+    uiTable(
+      [{ label: t("adblock.col.name") }, { label: t("dns.col.device") }, { label: t("adblock.col.outcome") }, { label: t("dns.col.last") }, { label: "" }],
+      list.map((e) => ({
+        cells: [
+          uiCell({ name: h("span", { class: "mono" }, e.name), sub: [typeName[e.type] ?? String(e.type), e.rule && [" · ", e.source === "own" ? t("adblock.own") : (e.listName ?? ""), " ", h("span", { class: "mono" }, e.rule)]] }),
+          nameOf(e.client),
+          uiState(tone[e.outcome] ?? "off", t("adblock.outcome." + e.outcome)),
+          h("span", { class: "mono small" }, new Date(e.at).toLocaleTimeString(state.lang)),
+          e.outcome === "blocked" ? button(t("adblock.allow"), { class: "small", onclick: () => rule(e.name, true) }) : e.outcome === "passed" || e.outcome === "allowed" ? button(t("adblock.block"), { class: "small", onclick: () => rule(e.name, false) }) : "",
+        ],
+        sub: `${nameOf(e.client)} · ${t("adblock.outcome." + e.outcome)} · ${new Date(e.at).toLocaleTimeString(state.lang)}`,
+      })),
+      { height: 44 },
     ),
   );
 }
@@ -766,18 +728,17 @@ function adblockBlock(el, b) {
       await refresh();
     } catch {}
   };
+  const pause = b.enabled && (b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock"));
   put(
     el,
-    h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/settings/adblock" }, t("adblock.title"))), b.enabled && h("span", { class: "state " + (b.paused ? "restarting" : b.serving ? "running" : "stopped") }, b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))),
+    // the block's own card is Home's: only the head of a card is taken here
+    uiCard({ title: h("a", { href: "#/network/adblock" }, t("adblock.title")), marks: b.enabled && uiState(b.paused ? "warn" : b.serving ? "ok" : "off", b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing")), actions: pause || null }).firstChild,
     b.enabled
       ? [
-          h("p", { class: "adblock-numbers" }, h("strong", null, b.blocked.toLocaleString(state.lang)), " ", h("span", { class: "muted small" }, t("adblock.block.ofDay", { questions: b.questions.toLocaleString(state.lang), share }))),
-          meterBar(share),
-          h("p", { class: "muted small" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) })),
-          h("div", { class: "actions" }, b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock")),
-          b.top?.length > 0 && h("div", { class: "adblock-top fits" }, h("div", { class: "muted small" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
+          h("div", { class: "ui-number" }, h("span", { class: "ui-stat-value" }, h("strong", null, b.blocked.toLocaleString(state.lang)), h("span", null, t("adblock.block.ofDay", { questions: b.questions.toLocaleString(state.lang), share }))), uiMeter(share, { kind: "load" }), h("span", { class: "ui-stat-hint" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) }))),
+          b.top?.length > 0 && h("div", { class: "stack-s ui-fits" }, h("div", { class: "ui-mfact-label" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
         ]
-      : h("p", { class: "muted small" }, t("adblock.block.off"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("common.open"))),
+      : uiEmpty({ text: t("adblock.block.off"), action: h("a", { class: "btn small", href: "#/network/adblock" }, t("common.open")) }),
   );
 }
 
@@ -846,24 +807,23 @@ function devicesCard() {
     const here = sub && info.devices.some((d) => d.endpoint === sub.endpoint);
     put(
       box,
-      info.devices.map((device) => {
-        const own = sub?.endpoint === device.endpoint;
-        return settingRow(
-          device.label + (own ? ` · ${t("account.thisDevice")}` : ""),
-          `${device.service} · ${dateTime(device.createdAt)}`,
-          h(
-            "span",
-            { class: "row-actions" },
-            button(t("notify.test"), { class: "small", onclick: () => attempt(async () => (await api("POST", "/api/notify/test", { channel: "push", device: device.id }), toast(t("notify.testSent")))) }),
-            button(t("app.remove"), { class: "small", onclick: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {}), localStorage.removeItem("hata.push")), await api("DELETE", `/api/notify/push?id=${device.id}`))) }),
-          ),
-        );
-      }),
-      !here && h("div", null, button(t("notify.pushHere"), { class: "primary", onclick: () => attempt(() => pushSubscribe(info.key)) }, "bell")),
+      uiRowsIn(
+        info.devices.map((device) => {
+          const own = sub?.endpoint === device.endpoint;
+          return uiRow({
+            lead: { icon: "bell" },
+            name: device.label + (own ? ` · ${t("account.thisDevice")}` : ""),
+            sub: `${device.service} · ${dateTime(device.createdAt)}`,
+            action: button(t("notify.test"), { class: "small", onclick: () => attempt(async () => (await api("POST", "/api/notify/test", { channel: "push", device: device.id }), toast(t("notify.testSent")))) }),
+            more: [{ label: t("app.remove"), icon: "trash", danger: true, run: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {}), localStorage.removeItem("hata.push")), await api("DELETE", `/api/notify/push?id=${device.id}`))) }],
+          });
+        }),
+      ),
+      !here && uiLine([button(t("notify.pushHere"), { class: "primary", onclick: () => attempt(() => pushSubscribe(info.key)) }, "bell")]),
     );
   };
   void paint();
-  return h("section", { class: "card pad" }, h("h2", null, t("notify.push.title")), h("p", { class: "muted small" }, t("notify.push.lead")), box, error);
+  return uiCard({ title: t("notify.push.title"), lead: t("notify.push.lead") }, box, error);
 }
 
 function channelCard(channel, rows, values) {
@@ -884,14 +844,15 @@ function channelCard(channel, rows, values) {
   };
   return h(
     "form",
-    { class: "card pad", onsubmit: (e) => (e.preventDefault(), void attempt(false)) },
-    h("h2", null, t(`notify.${channel}.title`)),
-    h("p", { class: "muted small" }, t(`notify.${channel}.lead`)),
-    settingRow(t("notify.enabled"), "", enabled),
-    rows,
-    last?.error && h("p", { class: "error" }, t("notify.lastError", { time: ago(last.at), message: last.error })),
-    error,
-    h("footer", { class: "pair" }, button(t("notify.test"), { onclick: () => attempt(true) }), h("button", { class: "btn primary" }, t("settings.save"))),
+    { onsubmit: (e) => (e.preventDefault(), void attempt(false)) },
+    uiCard(
+      { title: t(`notify.${channel}.title`), lead: t(`notify.${channel}.lead`) },
+      settingRow(t("notify.enabled"), "", enabled),
+      rows,
+      last?.error && uiNotice({ tone: "bad", text: t("notify.lastError", { time: ago(last.at), message: last.error }) }),
+      error,
+      uiFoot(button(t("notify.test"), { onclick: () => attempt(true) }), h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
   );
 }
 
@@ -902,7 +863,7 @@ function telegramCard() {
   const config = state.notify.config.telegram;
   const token = h("input", { type: "password", autocomplete: "off", spellcheck: false, class: "mono", placeholder: config.saved ? t("notify.tokenSaved") : "123456789:AA…" });
   const chat = h("input", { value: config.chat, spellcheck: false, class: "mono", placeholder: "123456789" });
-  const found = h("div", { class: "pair" });
+  const found = uiLine([]);
   const find = async () => {
     try {
       const chats = await api("POST", "/api/notify/telegram/chats", { token: token.value.trim() });
@@ -914,7 +875,7 @@ function telegramCard() {
   };
   return channelCard(
     "telegram",
-    [settingRow(t("notify.telegram.token"), t("notify.telegram.tokenHint"), token), settingRow(t("notify.telegram.chat"), t("notify.telegram.chatHint"), h("span", { class: "pair" }, chat, button(t("notify.telegram.find"), { class: "small", onclick: find }, "search"))), found],
+    [settingRow(t("notify.telegram.token"), t("notify.telegram.tokenHint"), token), settingRow(t("notify.telegram.chat"), t("notify.telegram.chatHint"), uiAffix(chat, button(t("notify.telegram.find"), { class: "small", onclick: find }, "search"))), found],
     () => ({ ...typedToken(token), chat: chat.value }),
   );
 }
@@ -923,7 +884,7 @@ function telegramCard() {
 function emailCard() {
   const config = state.notify.config.email;
   const host = h("input", { value: config.host, spellcheck: false, class: "mono", placeholder: "smtp.gmail.com" });
-  const port = h("input", { type: "number", min: 1, max: 65535, value: config.port, class: "mono port" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: config.port, class: "mono short" });
   const security = h("select", null, ["starttls", "tls", "none"].map((value) => h("option", { value, selected: config.security === value }, t("notify.email.security." + value))));
   // the usual port follows the choice, unless one of one's own was typed
   security.addEventListener("change", () => {
@@ -944,10 +905,10 @@ function emailCard() {
   return channelCard(
     "email",
     [
-      settingRow(t("notify.email.host"), t("notify.email.hostHint"), h("span", { class: "pair" }, host, port)),
+      settingRow(t("notify.email.host"), t("notify.email.hostHint"), uiAffix(host, port)),
       settingRow(t("notify.email.securityTitle"), t("notify.email.securityHint"), security),
       settingRow(t("notify.email.user"), t("notify.email.userHint"), user),
-      settingRow(t("notify.email.password"), t("notify.email.passwordHint"), forget ? h("span", { class: "pair" }, password, forget) : password),
+      settingRow(t("notify.email.password"), t("notify.email.passwordHint"), forget ? uiAffix(password, forget) : password),
       settingRow(t("notify.email.from"), t("notify.email.fromHint"), from),
       settingRow(t("notify.email.to"), t("notify.email.toHint"), to),
     ],
@@ -959,23 +920,16 @@ function notificationsSection() {
   const n = state.notify;
   if (!n) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
-  const toggle = (key) => {
-    const box = h("input", {
-      type: "checkbox",
-      checked: n.config[key],
-      onchange: async () => {
+  const toggle = (key) =>
+    uiSwitch({
+      on: n.config[key],
+      label: t("notify." + key),
+      onchange: async (on) => {
         error.textContent = "";
-        try {
-          state.notify = await api("PUT", "/api/notify", { [key]: box.checked });
-          toast(t("settings.saved"));
-        } catch (err) {
-          box.checked = !box.checked;
-          error.textContent = errorText(err);
-        }
+        state.notify = await api("PUT", "/api/notify", { [key]: on });
+        toast(t("settings.saved"));
       },
     });
-    return box;
-  };
   const ntfyUrl = h("input", { type: "url", value: n.config.ntfy.url, spellcheck: false, class: "mono", placeholder: "https://ntfy.sh/my-topic" });
   const ntfyToken = h("input", { type: "password", autocomplete: "off", spellcheck: false, class: "mono", placeholder: n.config.ntfy.saved ? t("notify.tokenSaved") : "" });
   const forget = n.config.ntfy.saved && button(t("notify.tokenForget"), { class: "small", onclick: () => attemptForget() });
@@ -989,11 +943,11 @@ function notificationsSection() {
   };
   const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
   return [
-    h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), toggle("problems")), settingRow(t("notify.resolved"), t("notify.resolvedHint"), toggle("resolved")), settingRow(t("notify.backups"), t("notify.backupsHint"), toggle("backups")), error),
+    uiCard({ title: t("settings.notifications"), lead: t("notify.lead") }, settingRow(t("notify.problems"), t("notify.problemsHint"), toggle("problems")), settingRow(t("notify.resolved"), t("notify.resolvedHint"), toggle("resolved")), settingRow(t("notify.backups"), t("notify.backupsHint"), toggle("backups")), error),
     hiddenItemsCard(),
     devicesCard(),
     telegramCard(),
-    channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
+    channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? uiAffix(ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
     emailCard(),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
@@ -1018,19 +972,15 @@ function hiddenItemsCard() {
   const row = (entry) => {
     // put off by an older version, which kept no words: said by its key
     const words = entry.code ? attentionWords(entry) : { title: t("attention.hidden.old"), text: entry.id };
-    return h(
-      "div",
-      { class: "hidden-item " + entry.severity, menu: true },
-      icon(entry.code ? attentionIcon(entry.code) : "alert"),
-      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
-      button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
-    );
+    const when = entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) });
+    return uiRow({
+      lead: { icon: entry.code ? attentionIcon(entry.code) : "alert", tone: entry.severity === "danger" ? "bad" : "warn" },
+      name: words.title,
+      sub: [words.text, when].filter(Boolean).join(" · "),
+      title: [words.title, words.text, when].filter(Boolean).join("\n"),
+      action: button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
+      menu: true,
+    });
   };
-  return h(
-    "section",
-    { class: "card pad", id: "hidden" },
-    h("h2", null, t("attention.hidden.title")),
-    h("p", { class: "muted small" }, t("attention.hidden.lead")),
-    list.length ? h("div", { class: "hidden-items" }, list.map(row)) : h("p", { class: "muted" }, t("attention.hidden.none")),
-  );
+  return uiCard({ title: t("attention.hidden.title"), count: list.length || null, lead: t("attention.hidden.lead"), flush: true, id: "hidden" }, list.length ? list.map(row) : uiEmpty({ text: t("attention.hidden.none") }));
 }

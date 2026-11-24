@@ -13,10 +13,10 @@ import uk from "./lang/uk.json";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
-import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
+import { awaitKodi, chooseConsole, kodiRuns, restScreen, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { parkPointer } from "./pointer";
-import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, withoutTranslate, TV_HOME, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_SWIPE_SCRIPT, browserPanelScript, PANEL_BUTTONS, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, withoutTranslate, TV_HOME, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -81,7 +81,7 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
       mine.calls.delete(said.id);
       if (typeof waiting === "function") waiting(said.error ? null : (said.result ?? {}));
       // the remote's "home" button, heard by the script every page gets
-    } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen" && said.params.payload === "home") void leaveBrowser().catch(() => {});
+    } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen") void fromScreen(String(said.params.payload ?? "")).catch(() => {});
     else if (said.method === "Page.frameNavigated" && !said.params?.frame?.parentId) void refreshPage();
     else if (said.method === "Page.loadEventFired") void refreshPage();
     else if (said.method === "Target.attachedToTarget") {
@@ -89,7 +89,8 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
       if (told.sessionId && told.targetInfo?.type === "iframe") {
         inner.add(told.sessionId);
         // a frame of another site is a page of its own to the browser: it gets the script too
-        for (const call of [{ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } }, { method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } }]) socket.send(JSON.stringify({ id: ++mine.asked, ...call, sessionId: told.sessionId }));
+        for (const source of [BROWSER_POINTER_SCRIPT, BROWSER_SWIPE_SCRIPT])
+          for (const call of [{ method: "Page.addScriptToEvaluateOnNewDocument", params: { source } }, { method: "Runtime.evaluate", params: { expression: source } }]) socket.send(JSON.stringify({ id: ++mine.asked, ...call, sessionId: told.sessionId }));
       }
     } else if (said.method === "Target.detachedFromTarget") inner.delete(String((said.params as unknown as { sessionId?: string }).sessionId));
         else if (said.method === "Page.screencastFrame") {
@@ -118,10 +119,30 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
   await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_HOME_SCRIPT } });
   await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } });
   await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } });
+  // the panel a finger pulls down from the top edge; frames of the same site are this target's too
+  for (const source of [browserPanelScript(panelWords()), BROWSER_SWIPE_SCRIPT]) {
+    await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source } });
+    await ask({ method: "Runtime.evaluate", params: { expression: source } });
+  }
   await ask({ method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
   // the pointer stands in the middle of the screen from the browser's start: put away into a corner, in the background
   void parkPointer();
   return mine;
+}
+
+/** The labels of the panel pulled down on the screen, in the server's language */
+function panelWords(): Record<string, string> {
+  const words = (settings.language === "uk" ? uk : en) as Record<string, string>;
+  return Object.fromEntries(PANEL_BUTTONS.map(([id]) => [id, words[`tv.panel.${id}`] ?? id]));
+}
+
+/** What the page on the screen asks through its binding: the remote's home key, or a button of the pulled-down panel */
+async function fromScreen(payload: string): Promise<void> {
+  if (payload === "home") return void (await leaveBrowser());
+  if (payload === "back" || payload === "forward" || payload === "reload" || payload === "start") {
+    const calls = browserCalls(payload, null);
+    if (calls) for (const call of calls) await ask(call);
+  }
 }
 
 /** One call of the browser's protocol; null when it did not answer or refused */
@@ -303,6 +324,7 @@ async function startBrowser(by: string): Promise<void> {
   const resume = back && playing ? { file: playing.file, at: Math.floor(playing.time + (playing.paused ? 0 : (Date.now() - playing.at) / 1000)), subtitle: playing.outside ?? "" } : null;
   await setUp();
   await writeUnit();
+  chooseConsole(false);
   sleepScreen(false);
   if (!(await browserRuns())) await quietTranslate();
   // The player lets the screen go a moment AFTER its service has stopped (its session is still being
@@ -366,7 +388,7 @@ export async function openPage(raw: unknown, seconds: unknown, by: string): Prom
   return tvReport();
 }
 
-/** The page leaves the screen: the player comes back when it had it (and the film goes on), else the console */
+/** The page leaves the screen: the player comes back when it had it (and the film goes on), else the screen sleeps (the console only when chosen) */
 export async function leaveBrowser(who = ""): Promise<TvReport> {
   const was = showing;
   // gone by its time or by the remote's button: whoever put it there
@@ -378,7 +400,7 @@ export async function leaveBrowser(who = ""): Promise<TvReport> {
   const back = was?.back ?? tvEnabled();
   // starting the player stops the browser: the two services exclude each other
   await run(back ? ["systemctl", "start", TV_UNIT] : ["systemctl", "stop", TV_BROWSER_UNIT], 60_000);
-  if (!back) await run(["chvt", "1"], 10_000);
+  if (!back) await restScreen();
   tellPage(null);
   if (back && was?.resume && (await awaitKodi())) await playOnTv(was.resume.file, by, was.resume.at, was.resume.subtitle || undefined).catch(() => {});
   record("tv.pageGone", { user: by });
@@ -523,6 +545,8 @@ export async function setScreen(screen: unknown, by: string): Promise<TvReport> 
     return switchTv(true, by);
   }
   if (screen === "off" || screen === "dark") {
+    // the console stays on the screen only when chosen as such; every other way off ends in sleep
+    chooseConsole(screen === "off");
     if (await browserRuns()) {
       if (showing) showing.back = false;
       else showing = { by, back: false, resume: null, until: 0, timer: null };

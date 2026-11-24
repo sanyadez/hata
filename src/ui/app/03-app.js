@@ -3,7 +3,7 @@
 
 // --- The whole history ----------------------------------------------------------------------------
 
-const historyUi = { entries: [], more: false, loaded: false, filter: "", quiet: false };
+const historyUi = { entries: [], more: false, loaded: false, filter: "", quiet: false, error: null, folded: new Set() };
 
 async function loadHistory(older = false) {
   const before = older && historyUi.entries.length ? historyUi.entries[historyUi.entries.length - 1].ts : Date.now() + 60_000;
@@ -12,8 +12,10 @@ async function loadHistory(older = false) {
     historyUi.entries = older ? [...historyUi.entries, ...page.entries] : page.entries;
     historyUi.more = page.more;
     historyUi.loaded = true;
+    historyUi.error = null;
   } catch (e) {
-    toast(errorText(e), "error");
+    if (historyUi.loaded) toast(errorText(e), "error");
+    else historyUi.error = errorText(e);
   }
   if (state.route.view === "activity") paintHistory();
 }
@@ -21,7 +23,10 @@ async function loadHistory(older = false) {
 function paintHistory() {
   const box = document.getElementById("history");
   if (!box) return;
-  if (!historyUi.loaded) return box.replaceChildren(waitMark());
+  const segment = uiSegment([{ value: "all", label: t("activity.all2") }, { value: "quiet", label: t("activity.noSignins") }], historyUi.quiet ? "quiet" : "all", (v) => ((historyUi.quiet = v === "quiet"), paintHistory()), { label: t("activity.history") });
+  const card = (...body) => put(box, uiCard({ flush: true, actions: segment, title: t("activity.events") }, ...body));
+  if (historyUi.error && !historyUi.loaded) return card(uiEmpty({ size: "error", title: t("activity.failed"), text: historyUi.error, action: button(t("ui.retry"), { onclick: () => ((historyUi.error = null), paintHistory(), loadHistory()) }) }));
+  if (!historyUi.loaded) return card(uiEmpty({ size: "loading" }));
   // each entry is worded first: the filter looks at what the person reads, in their language
   const words = historyUi.filter.trim().toLowerCase();
   const days = new Map();
@@ -33,49 +38,41 @@ function paintHistory() {
     if (!days.has(day)) days.set(day, []);
     days.get(day).push(row);
   }
-  put(
-    box,
-    days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none")),
-    historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
-    !historyUi.more && days.size > 0 && h("p", { class: "card pad muted small center-row" }, t("activity.start")),
+  if (!days.size) return card(words ? uiEmpty({ text: t("activity.noMatch") }) : uiEmpty({ size: "big", icon: "clock", title: t("activity.none") }));
+  card(
+    [...days].map(([day, rows]) => uiGroup({ name: day, count: rows.length, open: !historyUi.folded.has(day), onToggle: (open) => (open ? historyUi.folded.delete(day) : historyUi.folded.add(day), paintHistory()) }, ...rows)),
+    historyUi.more ? uiEmpty({ text: t("activity.olderLead"), action: button(t("activity.older"), { class: "quiet small", onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) }) }) : uiEmpty({ text: t("activity.start") }),
   );
 }
 
 function renderActivity() {
-  const search = h("input", { type: "search", placeholder: t("activity.search"), value: historyUi.filter, oninput: () => ((historyUi.filter = search.value), paintHistory()) });
-  const quiet = h("input", { type: "checkbox", checked: historyUi.quiet, onchange: () => ((historyUi.quiet = quiet.checked), paintHistory()) });
-  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("activity.history")), h("p", { class: "meta" }, t("activity.historyLead"))), h("div", { class: "actions" }, h("label", { class: "check inline" }, quiet, h("span", null, t("activity.noSignins"))), search)), h("div", { id: "history", class: "stack" }));
+  const search = h("input", { type: "search", class: "ui-search", placeholder: t("activity.search"), "aria-label": t("activity.search"), value: historyUi.filter, oninput: () => ((historyUi.filter = search.value), paintHistory()) });
+  shell(pageHead({ title: t("activity.history"), facts: [t("activity.historyLead")], search }), h("div", { id: "history" }));
   paintHistory();
   void loadHistory();
 }
 
 function widget(id, el) {
-  el.classList.add("widget");
+  el.classList.add("ui-home-block");
   el.dataset.widget = id;
   return el;
 }
 
 const machineOfBlock = (id) => (state.overview?.machines ?? []).find((m) => "machine:" + m.id === id);
 
-/** One number of a machine's row: label and value on a line, a bar or a little chart, a line under it; empty when not known */
-function meter(label, value, gauge, hint, cls = "") {
-  if (value == null) return h("div", { class: "meter empty" });
-  return h("div", { class: "meter" }, h("div", { class: "meter-top" }, h("span", { class: "clip" }, label), h("strong", { class: cls }, value)), gauge, h("span", { class: "meter-hint" }, hint || " "));
-}
-
-/** The numbers of a machine as one row of cells, so the rows of several machines line up */
+/** The numbers of a machine as rows of the block: a meter or a little chart and the value, one metric to a row */
 function machineMeters(s) {
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const disk = s.disks[0];
   const diskPercent = disk ? Math.round((disk.used / disk.total) * 100) : 0;
-  return [
-    meter(t("sys.cpu"), s.cpu == null ? null : s.cpu + "%", meterBar(s.cpu ?? 0), t("sys.cores", { n: s.cores }), level(s.cpu ?? 0)),
-    meter(t("sys.memory"), bytes(mem.used), meterBar(memPercent), t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), level(memPercent)),
-    meter(t("sys.disk"), disk ? diskPercent + "%" : null, meterBar(diskPercent), disk && t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), level(diskPercent)),
-    meter(t("sys.network"), s.net ? bytes(s.net.rx + s.net.tx) + "/s" : null, sparkline(s.history.net), s.net && `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s`),
-    meter(t("sys.temperature"), s.temperature == null ? null : s.temperature + " °C", meterBar(s.temperature ?? 0, s.temperature >= 85 ? "warn" : ""), t("sys.cpu"), s.temperature >= 85 ? "warn" : ""),
-  ];
+  return uiMeterFacts([
+    s.cpu != null && { icon: "cpu", label: t("sys.cpu"), value: s.cpu, text: s.cpu + "%" },
+    { icon: "memory", label: t("sys.memory"), value: memPercent, text: bytes(mem.used) },
+    disk && { icon: "disk", label: t("sys.disk"), value: diskPercent, kind: "capacity", text: diskPercent + "%" },
+    s.net && { icon: "network", label: t("sys.network"), spark: sparkline(s.history.net), text: bytes(s.net.rx + s.net.tx) + "/s" },
+    s.temperature != null && { icon: "temp", label: t("sys.temperature"), value: s.temperature, text: s.temperature + " °C" },
+  ]);
 }
 
 /** What brings a machine that is away back, as the buttons of its row */
@@ -91,32 +88,26 @@ function machineBack(m) {
   );
 }
 
-/** The block of another machine's numbers: one row — who it is, then its numbers or why there are none */
+/** The block of another machine's numbers: who it is and its state, then its numbers or why there are none */
 function machineBlock(id) {
   const m = machineOfBlock(id);
   if (!m) return null;
   let el = homeUi.widgets[id];
   if (!el) {
-    el = widget(id, h("section", { class: "card machine-row" }));
+    el = widget(id, uiCard({ cls: "ui-home-machine" }));
     homeUi.widgets[id] = el;
   }
   const waiting = m.online && !m.status;
-  const who = h(
-    "div",
-    { class: "mrow-who" },
-    h("a", { class: "mrow-name", href: `#/machines/${m.id}` }, h("i", { class: "dot " + (m.online ? "running" : "stopped") }), h("span", { class: "clamp2" }, m.name)),
-    h("span", { class: "muted small" }, !m.online ? t("home.machineAway", { ago: ago(m.seen) }) : waiting ? t("home.machineWaiting") : t("machines.online")),
-    m.os && h("span", { class: "muted small clip" }, m.os),
-  );
-  let body;
-  el.classList.toggle("away", !m.online);
+  el.classList.toggle("ui-away", !m.online);
   el.oncontextmenu = null;
+  const head = uiBlockHead({ title: [h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))], actions: m.os && h("span", { class: "ui-row-time" }, m.os) });
+  let body;
   if (!m.online) {
     const { buttons, openMore } = machineBack(m);
-    body = [h("p", { class: "mrow-away muted small" }, t("machines.offlineLead", { ago: ago(m.seen) })), h("div", { class: "row-actions" }, buttons)];
+    body = uiEmpty({ text: t("machines.offlineLead", { ago: ago(m.seen) }), action: uiLine(buttons) });
     if (openMore) el.oncontextmenu = (e) => (e.preventDefault(), openMore({ x: e.clientX, y: e.clientY }));
-  } else body = h("div", { class: "meters" + (waiting ? " waiting" : "") }, waiting ? Array.from({ length: 5 }, () => h("div", { class: "meter skeleton" }, h("i"), h("i"), h("i"))) : machineMeters(m.status));
-  put(el, who, body);
+  } else body = waiting ? uiEmpty({ size: "loading", text: t("home.machineWaiting") }) : h("div", { class: "ui-mfacts" }, machineMeters(m.status));
+  put(el, head, body);
   return el;
 }
 
@@ -127,37 +118,39 @@ function renderHome() {
   // what needs attention and what happened are the administrators': a member's page has no such blocks
   homeUi.widgets = {
     stats: statsBlock(),
-    attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
-    activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
-    adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
-    tv: isAdmin() && hasModule("tv") ? widget("tv", h("section", { class: "card pad tv-block" })) : null,
+    attention: isAdmin() ? widget("attention", uiCard({ flush: true, cls: "ui-home-attention" })) : null,
+    activity: isAdmin() ? widget("activity", uiCard({ flush: true, cls: "ui-home-activity" })) : null,
+    adblock: isAdmin() ? widget("adblock", uiCard({ cls: "ui-home-adblock" })) : null,
+    tv: isAdmin() && hasModule("tv") ? widget("tv", uiCard({ cls: "ui-home-tv" })) : null,
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "card page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
-    h("div", { class: "pg", id: "pg" }),
+    pageHead({ id: "home-head", title: greeting, state: h("span", { id: "counts" }), facts: [h("span", { id: "host" }, " "), h("span", { id: "counts-rest" })], search: h("span", { id: "grid-edit-slot" }) }),
+    // the grid draws itself into it (its classes are the grid's, set by paintGrid)
+    h("div", { id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
   renderHomeBody();
 }
 
-const activityBody = (o) => [h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+const activityBody = (o) => [
+  uiBlockHead({ title: t("activity.title"), pad: true, actions: isAdmin() && o.activity.length > 0 && h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")) }),
+  o.activity.length ? h("div", { class: "ui-rows ui-fits" }, o.activity.map((e) => activityItem(e))) : uiEmpty({ text: t("activity.none") }),
+];
 
 function attentionDialog(list) {
-  let dialog;
-  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, t("attention.title")), closeX(() => dialog)), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  openDialog("wide", h("h2", null, t("attention.title")), h("div", { class: "ui-rows ui-attention-list" }, list.map((item) => attentionItem(item))));
 }
 
 function attentionBlock(list) {
+  const hidden = state.overview?.attentionHidden > 0 && h("a", { class: "ui-link", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron"));
+  const more = uiEmpty({ text: " ", action: button(t("attention.showAll"), { class: "quiet small", onclick: () => attentionDialog(state.overview.attention) }) });
+  more.classList.add("ui-fits-more");
+  more.hidden = true;
   return [
-    h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
-    list.length ? h("div", { class: "attention-list fits" }, list.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
-    h(
-      "div",
-      { class: "block-foot" },
-      h("button", { type: "button", class: "link small more-items fits-more", hidden: true, onclick: () => attentionDialog(state.overview.attention) }, h("span"), icon("chevron")),
-      state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
-    ),
+    uiBlockHead({ title: [t("attention.title"), uiCount(list.length)], pad: true, actions: hidden }),
+    list.length ? h("div", { class: "ui-rows ui-attention-list ui-fits" }, list.map((item) => attentionItem(item))) : uiEmpty({ icon: "check", tone: "ok", text: t("attention.none") }),
+    more,
   ];
 }
 
@@ -168,7 +161,18 @@ function renderHomeBody() {
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
-  document.getElementById("counts")?.replaceChildren(...(counts.length ? [h("span", { class: "status-pill" }, counts.flatMap(([st, n], i) => [i > 0 && h("span", { class: "dot-sep" }, "·"), h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))]))] : []));
+  // the worst of them is the state by the greeting; the others are said in words in the line under it
+  const worst = counts.find(([st]) => st === "restarting") ?? counts.find(([st]) => st === "partial") ?? counts.find(([st]) => st === "running") ?? counts[0];
+  const tone = { running: "ok", restarting: "bad", partial: "warn", stopped: "off" };
+  document.getElementById("counts")?.replaceChildren(...(worst ? [uiState(tone[worst[0]], t("home.count." + worst[0], { n: worst[1] }))] : []));
+  const rest = counts.filter((c) => c !== worst).map(([st, n]) => t("home.count." + st, { n })).join(" · ");
+  const restBox = document.getElementById("counts-rest");
+  if (restBox) {
+    restBox.textContent = rest;
+    restBox.hidden = !rest;
+    const sep = restBox.previousElementSibling;
+    if (sep?.classList.contains("ui-dot-sep")) sep.hidden = !rest;
+  }
 
   paintGrid();
   renderFolder();
@@ -180,7 +184,7 @@ const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", {
 const removeBlock = (id) => changeLayout((layout) => void takeTile(layout, "block:" + id));
 
 function layoutTextDialog() {
-  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", "aria-label": t("home.layoutText"), disabled: true });
+  const area = uiCodeArea({ label: t("home.layoutText"), disabled: true });
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   const save = button(t("home.saveLayout"), {
@@ -231,7 +235,7 @@ async function loadApp(quiet = false) {
 
 function renderApp() {
   if (state.app?.name !== state.route.name) state.app = null;
-  shell(h("div", { id: "app-head" }), h("div", { id: "app-tab" }));
+  shell(h("div", { id: "app-head-box" }, h("div", { id: "app-head" })), h("div", { id: "app-tab" }));
   if (state.app) {
     renderAppHead();
     renderAppTab();
@@ -268,16 +272,15 @@ const LOGIN_SEEN_MS = 5 * 60_000;
 
 /** How to sign in to an app: one line, or the user name and the password apart, each to copy. A value the page does not hold yet comes by a button */
 function loginBlock(login, ask) {
-  if (login.kind === "first-visit" || login.kind === "none") return h("p", { class: "login-line muted small" }, t(`app.login.${login.kind}`));
-  const box = h("div", { class: "login-block" });
-  const copyButton = (label, value) => h("button", { type: "button", class: "icon-btn", title: `${t("twofa.copy")}: ${label}`, "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(value) }, icon("copy"));
-  const row = (label, value) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value" }, value), copyButton(label, value));
+  if (login.kind === "first-visit" || login.kind === "none") return h("p", { class: "muted small" }, t(`app.login.${login.kind}`));
+  const box = h("div", { class: "stack-s" });
+  const row = (label, value) => uiFacts([[label, uiCommand(value, { label })]]);
   const paint = () => {
     const given = loginSeen.get(ask.key);
     const seen = { ...login, ...(given ?? {}) };
     const waits = !given && login.ask?.length;
-    const hiddenRow = (label) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value muted" }, "••••••••"));
-    const missing = (label, words) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "muted small login-value" }, words));
+    const hiddenRow = (label) => uiFacts([[label, h("span", { class: "mono muted" }, "••••••••")]]);
+    const missing = (label, words) => uiFacts([[label, h("span", { class: "muted small" }, words)]]);
     const part = (field, label) => {
       if (waits && login.ask.includes(field)) return hiddenRow(label);
       if (seen[field]) return row(label, seen[field]);
@@ -298,10 +301,10 @@ function loginBlock(login, ask) {
     box.replaceChildren(...[
       part("user", t("app.login.user")),
       part("password", t("auth.password")),
-      given?.line && h("p", { class: "muted small mono login-source" }, given.line),
+      given?.line && h("p", { class: "muted small mono wrap" }, given.line),
       h("p", { class: "muted small" }, t(`app.login.${login.kind}`)),
-      showButton && h("div", { class: "login-actions" }, showButton),
-    ].filter(Boolean));
+      showButton && uiLine([showButton]),
+    ].flat().filter(Boolean));
   };
   paint();
   return box;
@@ -323,7 +326,7 @@ async function appLoginDialog(name, title) {
 
 function notesDialog(title, tips) {
   let dialog;
-  dialog = openDialog("confirm", h("h2", null, t("app.notesOf", { title })), h("div", { class: "tips prose" }, md(tips)), h("footer", null, closeButton(() => dialog, t("common.close"))));
+  dialog = openDialog("confirm", h("h2", null, t("app.notesOf", { title })), uiProse(md(tips), { soft: true }), h("footer", null, closeButton(() => dialog, t("common.close"))));
 }
 
 /** What can be done to an app from its tile: open it, start or stop it, go to its settings, logs and the rest */
@@ -332,15 +335,13 @@ function appTileMenu(app, anchor, at) {
     const box = anchor?.getBoundingClientRect();
     return jobTileMenu(app, at ?? { x: box.left, y: box.bottom + 6 });
   }
-  let dialog;
   const url = isUp(app) ? appUrl(app) : null;
   const busy = !!app.job;
-  const item = (label, iconName, action, cls = "", off = false) => h("button", { type: "button", class: "menu-item " + cls, disabled: off, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  const page = (label, iconName, tab) => h("a", { class: "menu-item", href: `#/apps/${app.name}${tab ? "/" + tab : ""}`, onclick: () => dialog.close() }, icon(iconName), label);
-  dialog = openDialog(
-    "menu dropdown",
-    h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))),
-    url && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, icon("external"), t("app.open")),
+  const item = (label, iconName, run, cls = "", off = false) => ({ label, icon: iconName, run, danger: cls === "danger", off });
+  const page = (label, iconName, tab) => ({ label, icon: iconName, href: `#/apps/${app.name}${tab ? "/" + tab : ""}` });
+  // it hangs under the button it was opened from, by the button's right edge — or above it, when there is no room below
+  menuAt(at ?? anchor, h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))), [
+    url && { label: t("app.open"), icon: "external", href: url, newTab: true },
     busy && item(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title)),
     isUp(app) ? item(t("app.stop"), "stop", () => startAction(app, "stop"), "", busy) : item(t("app.start"), "play", () => startAction(app, "start"), "", busy),
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
@@ -355,26 +356,20 @@ function appTileMenu(app, anchor, at) {
     isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
-  );
-  if (at) return placeAt(dialog, at);
-  // it hangs under the button it was opened from, by the button's right edge — or above it, when there is no room below
-  const box = anchor.getBoundingClientRect();
-  const below = box.bottom + 6 + dialog.offsetHeight <= document.documentElement.clientHeight - 8;
-  placeAt(dialog, { x: box.right - dialog.offsetWidth, y: below || box.top - 6 - dialog.offsetHeight < 8 ? box.bottom + 6 : box.top - 6 - dialog.offsetHeight });
+  ]);
 }
 
+/** What the head of an app's page keeps in its "⋯" */
+const appMoreEntries = (app) =>
+  [
+    isAdmin() && { label: t("assistant.ask"), icon: "chat", run: () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) }) },
+    isUp(app) && { label: t("app.restart"), icon: "refresh", off: !!app.job, run: () => startAction(app, "restart") },
+    { label: t("app.update"), icon: "up", off: !!app.job, run: () => startAction(app, "update") },
+    { label: t("machines.move"), icon: "server", off: !!app.job, run: () => moveAppDialog("", app) },
+    { label: t("app.remove") + "…", icon: "trash", danger: true, off: !!app.job, run: () => removeDialog(app) },
+  ].filter(Boolean);
 function appMoreMenu(app, at = null) {
-  let dialog;
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, disabled: !!app.job, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
-    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
-    item(t("app.update"), "up", () => startAction(app, "update")),
-    item(t("machines.move"), "server", () => moveAppDialog("", app)),
-    item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
-  );
-  if (at) placeAt(dialog, at);
+  menuAt(at ?? { x: innerWidth / 2, y: 120 }, menuHeader(app.title, t("status." + appState(app)), "box"), appMoreEntries(app));
 }
 
 function renderAppHead() {
@@ -382,37 +377,31 @@ function renderAppHead() {
   const head = document.getElementById("app-head");
   if (!app || !head) return;
   const url = isUp(app) ? appUrl(app) : null;
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("app.tab." + id));
-  put(head,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
-    h(
-      "div",
-      { class: "app-head", menu: isAdmin() && ((at) => appTileMenu(app, null, at)) },
-      appIcon(app, "lg"),
-      h(
-        "div",
-        { class: "grow" },
-        h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)),
-        h("p", { class: "meta" }, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/\/$/, ""), icon("external")) : null, url && h("span", { class: "dot-sep" }, "·"), t("app.containersCount", { n: app.containers.length }), app.store && h("span", { class: "dot-sep" }, "·"), app.store && t("app.fromStore", { store: app.store })),
-      ),
-      h(
-        "div",
-        { class: "actions" },
-        !isAdmin() && url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-        ...(!isAdmin() ? [] : [
-        app.job && button(t("jobs.showLog"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs"),
-        app.update && !app.job && button(t("app.storeUpdateGo"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
-        !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
-        (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
-        isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
-        isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
-        url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => appMoreMenu(app) }, icon("more")),
-        ]),
-      ),
-    ),
-    isAdmin() && h("div", { class: "tabs" }, tab("overview", "grid"), tab("settings", "sliders"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive"), tab("terminal", "terminal")),
-  );
+  const tab = (id) => ({ label: t("app.tab." + id), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}`, active: state.route.tab === id });
+  const admin = isAdmin();
+  const open = url && { label: t("app.open"), icon: "external", href: url, newTab: true, primary: true };
+  const power = admin && (isUp(app) ? { label: t("app.stop"), icon: "stop", run: () => !app.job && startAction(app, "stop") } : { label: t("app.start"), icon: "play", primary: !url, run: () => !app.job && startAction(app, "start") });
+  const made = pageHead({
+    id: "app-head",
+    crumbs: [{ label: t("home.apps"), href: "#/apps" }, { label: app.title }],
+    logo: appIcon(app, "row"),
+    title: app.title,
+    state: appStateBadge(app),
+    facts: [url && h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/\/$/, ""), icon("external")), t("app.containersCount", { n: app.containers.length }), app.store && t("app.fromStore", { store: app.store })],
+    actions: [open, power],
+    more: admin ? () => appMoreEntries(app) : null,
+    menu: admin && ((at) => appTileMenu(app, null, at)),
+    tabs: admin && uiTabs(["overview", "settings", "logs", "compose", "backups", "terminal"].map(tab)),
+  });
+  // what waits for the person stands under the head: work going on, a newer version, a part that does not run
+  const notices = admin && [
+    app.job && uiNotice({ tone: "info", title: t("status.busy"), action: button(t("jobs.showLog"), { class: "small", onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs") }),
+    !app.job && app.update && uiNotice({ tone: "info", title: t("app.storeUpdateGo"), action: button(t("app.update") + "…", { class: "small", onclick: () => storeUpdateDialog(app) }, "up") }),
+    !app.job && !app.update && app.newer?.length > 0 && uiNotice({ tone: "info", title: t("app.newer"), text: app.newer.join(", "), action: button(t("app.update"), { class: "small", onclick: () => startAction(app, "update") }, "up") }),
+    (app.status === "partial" || app.status === "restarting") && uiNotice({ tone: "warn", title: t("status." + appState(app)), action: button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat") }),
+  ].filter(Boolean);
+  const box = h("div", { class: "stack", id: "app-head-box" }, made, notices?.length > 0 && uiCard({}, notices));
+  (document.getElementById("app-head-box") ?? head).replaceWith(box);
 }
 
 /** What the store's newer version changes in the app's compose file, before anything happens */
@@ -423,8 +412,8 @@ async function storeUpdateDialog(app) {
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  const rows = (kind) => plan.changes.filter((c) => c.kind === kind && !c.path.startsWith("x-casaos")).map((c) => h("tr", null, h("td", { class: "mono small" }, c.path), h("td", { class: "mono small" }, h("div", { class: "muted clip" }, c.from || "—"), h("div", { class: "clip" }, c.to || t("update.removed")))));
-  const table = (kind) => h("div", { class: "card table-wrap" }, h("table", { class: "changes" }, h("tbody", null, rows(kind))));
+  const rows = (kind) => plan.changes.filter((c) => c.kind === kind && !c.path.startsWith("x-casaos")).map((c) => ({ cells: [h("span", { class: "mono small", title: c.path }, c.path), h("div", { class: "mono small" }, h("div", { class: "muted clip" }, c.from || "—"), h("div", { class: "clip" }, c.to || t("update.removed")))], sub: `${c.from || "—"} → ${c.to || t("update.removed")}` }));
+  const table = (kind) => uiCard({ flush: true }, uiTable([{ label: t("update.col.line") }, { label: t("update.col.change") }], rows(kind)));
   const fromStore = rows("store");
   const conflicts = rows("conflict");
   // in words first: which version becomes which, what is added; the lines of the file are for whoever asks
@@ -432,23 +421,23 @@ async function storeUpdateDialog(app) {
   const versions = words.filter((w) => w.code === "version");
   const several = new Set(words.map((w) => w.service).filter(Boolean)).size > 1;
   const WORD_ICONS = { image: "refresh", added: "plus", addedFirst: "plus", removed: "trash", envAdded: "sliders", envChanged: "sliders", envRemoved: "sliders", ports: "network", volumes: "folder", other: "code", files: "file" };
-  const word = (w) => h("li", null, icon(WORD_ICONS[w.code] ?? "code"), h("div", { class: "grow" }, h("div", null, t("update.word." + w.code, w)), several && w.service && !["added", "addedFirst", "removed"].includes(w.code) && h("div", { class: "muted small" }, t("update.word.in", w))));
+  const word = (w) => uiRow({ lead: { icon: WORD_ICONS[w.code] ?? "code" }, name: t("update.word." + w.code, w), sub: several && w.service && !["added", "addedFirst", "removed"].includes(w.code) ? t("update.word.in", w) : null });
   const others = words.filter((w) => w.code !== "version");
   const lead = versions.length ? "update.leadVersion" : plan.staying ? "update.leadSame" : "update.leadSetup";
   const dialog = openDialog(
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t(lead, { store: plan.store, version: plan.staying }))), closeX(() => dialog)),
-    !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
-    plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
+    !plan.exact && uiNotice({ tone: "warn", text: t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store }) }),
+    plan.notes && uiProse(md(plan.notes), { soft: true, title: t("update.before") }),
     // the store's own words on why it changed the app's files: what the lines below cannot say
-    plan.why && h("div", { class: "tips prose" }, h("strong", null, t("update.why", { store: plan.store })), h("p", null, plan.why)),
-    versions.length > 0 && h("div", { class: "update-versions" }, versions.map((w) => h("div", { class: "update-version" }, h("span", { class: "muted" }, versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version")), h("span", { class: "mono" }, w.from), icon("arrow"), h("strong", { class: "mono" }, w.to)))),
-    others.length > 0 && h("div", { class: "stack" }, h("h3", null, t(versions.length ? "update.also" : "update.what")), h("ul", { class: "update-words" }, others.map(word))),
+    plan.why && uiProse(h("p", null, plan.why), { soft: true, title: t("update.why", { store: plan.store }) }),
+    versions.length > 0 && h("div", { class: "stack-s" }, versions.map((w) => uiVersionChange({ name: versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version"), from: w.from, to: w.to }))),
+    others.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t(versions.length ? "update.also" : "update.what") }), h("div", { class: "ui-rows" }, others.map(word))),
     words.length === 0 && fromStore.length > 0 && h("p", { class: "muted small" }, t("update.small")),
-    conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
+    conflicts.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t("update.conflicts"), lead: t("update.conflictsLead") }), table("conflict")),
     h("p", { class: "muted small" }, t(state.settings?.backup?.beforeUpdate ? "update.safe" : "update.safeNoCopy")),
     fromStore.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("update.lines")), table("store")),
-    h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),
+    h("details", null, h("summary", { class: "muted small" }, t("update.file")), uiCodeArea({ value: plan.compose, readOnly: true, label: "compose.yml" })),
     h(
       "footer",
       null,
@@ -489,7 +478,7 @@ const accessLink = () => h("p", { class: "muted small" }, t("access.givenAt"), "
 const appAccess = { name: "", at: 0, data: null };
 function appAccessCard(app) {
   if (!isAdmin()) return null;
-  const box = h("section", { class: "card pad stack-s" });
+  const box = h("div");
   const paint = () => {
     const a = appAccess.data;
     const users = a?.users ?? [];
@@ -501,11 +490,13 @@ function appAccessCard(app) {
     const who = !a ? "…" : a.allowed === "all" ? t("access.everyone") : users.filter((u) => a.allowed.includes(u.id)).map((u) => u.name).join(", ") || t("app.accessAdmins");
     put(
       box,
-      h("div", { class: "section-head" }, h("h2", null, t("app.access")), h("a", { class: "link small", href: "#/settings/users/access" }, t("users.part.access"), " →")),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("app.accessWho")), h("span", null, who)),
-      a && h("label", { class: "check" }, h("input", { type: "checkbox", checked: a.protect, disabled: !!a.cannotProtect, onchange: (e) => save({ protect: e.target.checked }) }), h("span", null, h("strong", null, t("access.signIn")), h("span", { class: "muted small block" }, a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden")))),
-      // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
-      a?.protect && a.others.length > 0 && h("div", { class: "muted small other-ports" }, t("access.others"), a.others.map((o) => h("label", null, h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }), String(o.port)))),
+      uiCard(
+        { title: t("app.access"), actions: h("a", { class: "ui-link", href: "#/settings/users/access" }, t("users.part.access"), icon("chevron")) },
+        ...uiFacts([[t("app.accessWho"), who]]),
+        a && uiSetting({ name: t("access.signIn"), explain: a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden"), control: uiSwitch({ on: a.protect, label: t("access.signIn"), disabled: !!a.cannotProtect, onchange: (on) => save({ protect: on }) }) }),
+        // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
+        a?.protect && a.others.length > 0 && uiField(t("access.others"), uiLine(a.others.map((o) => uiCheck(h("span", { class: "mono" }, String(o.port)), h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) })))), null, { group: true }),
+      ),
     );
   };
   const ask = async () => {
@@ -522,43 +513,52 @@ function appAccessCard(app) {
 }
 
 function appOverviewTab(app, box) {
-  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
-  const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
+  const running = app.containers.filter((c) => c.state === "running").length;
+  const statsBox = h("div", { class: "ui-stats" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), uiStat({ icon: "box", label: t("app.containers"), value: String(running), unit: "/ " + app.containers.length, hint: t("status." + app.status) }));
 
   const containerRow = (c) => {
     const s = app.stats?.[c.name];
-    const menu = (at) =>
-      menuAt(at, menuHeader(c.name, c.image, "box"), [
-        { label: t("app.logs"), icon: "logs", href: `#/apps/${app.name}/logs` },
-        isAdmin() && { label: t("app.tab.terminal"), icon: "terminal", href: `#/apps/${app.name}/terminal` },
-        { label: t("menu.copyName"), icon: "copy", run: () => copyText(c.name) },
-        { label: t("menu.copyImage"), icon: "copy", run: () => copyText(c.image) },
-      ]);
-    return h("tr", { menu }, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
+    const menuEntries = [
+      { label: t("app.logs"), icon: "logs", href: `#/apps/${app.name}/logs` },
+      isAdmin() && { label: t("app.tab.terminal"), icon: "terminal", href: `#/apps/${app.name}/terminal` },
+      { label: t("menu.copyName"), icon: "copy", run: () => copyText(c.name) },
+      { label: t("menu.copyImage"), icon: "copy", run: () => copyText(c.image) },
+    ].filter(Boolean);
+    const menu = (at) => menuAt(at, menuHeader(c.name, c.image, "box"), menuEntries);
+    const tone = c.state === "running" ? (app.newer?.includes(c.image) ? "warn" : "ok") : c.state === "restarting" ? "warn" : "off";
+    return {
+      menu,
+      cells: [
+        uiCell({ name: h("span", { class: "mono" }, c.name), sub: h("span", { class: "mono", title: c.image }, c.image) }),
+        uiState(tone, app.newer?.includes(c.image) ? t("app.newerImage") : c.status),
+        s ? s.cpu.toFixed(1) + " %" : "—",
+        s ? bytes(s.memory) : "—",
+        h("span", { class: "mono small" }, c.ports.join(", ") || "—"),
+        uiMore(() => menuEntries, { size: "s" }),
+      ],
+      sub: [c.status, s && `${s.cpu.toFixed(1)} %`, s && bytes(s.memory)].filter(Boolean).join(" · "),
+    };
   };
 
-  box.replaceChildren(
+  const containersTable = () => uiTable([{ label: t("app.col.container") }, { label: t("app.col.state") }, { label: t("sys.cpu"), num: true }, { label: t("sys.memory"), num: true }, { label: t("app.col.ports") }, { label: "" }], app.containers.map(containerRow));
+  put(box,
     appServiceCard(app),
-    h(
-      "div",
-      { class: "columns" },
-      h(
-        "div",
-        { class: "stack" },
-        h("section", { class: "card head-in" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.resources"))), statsBox),
-        app.containers.length
-          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
-          : h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("app.containers"))), h("p", { class: "muted" }, t("app.noContainers"))),
-      ),
-      h(
-        "aside",
-        { class: "side" },
-        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+    uiColumns(
+      [
+        uiCard({ title: t("app.resources"), flush: true }, statsBox),
+        uiCard(
+          { title: t("app.containers"), count: app.containers.length || null, flush: true },
+          app.containers.length ? h("div", { id: "containers" }, containersTable()) : uiEmpty({ text: t("app.noContainers") }),
+          app.containers.length > 0 && h("div", { class: "ui-inset" }, uiCommand(`docker compose -p ${app.name} ps`)),
+        ),
+      ],
+      [
+        uiCard({ title: t("app.glance") }, ...uiFacts([app.port && [t("app.address"), h("span", { class: "mono" }, appAddress(app))], [t("app.composeFile"), h("span", { class: "mono", title: app.composeFile }, app.composeFile)], ...app.folders.map((f, i) => [i ? "" : t("app.folders"), h("span", { class: "mono" }, f)]), [t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")], [t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" })]])),
         appAccessCard(app),
-        app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
-        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
-        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
-      ),
+        app.login && uiCard({ title: t("app.login") }, loginBlock(app.login, loginAsker(app.name))),
+        app.tips && uiCard({ title: t("app.notes") }, uiProse(md(app.tips), { soft: true })),
+        uiCard({ title: t("activity.title"), flush: true }, app.activity.length ? app.activity.slice(0, 6).map((e) => activityItem(e)) : uiEmpty({ text: t("activity.none") })),
+      ],
     ),
   );
 
@@ -572,7 +572,7 @@ function appOverviewTab(app, box) {
     const parts = bytesParts(memory);
     setStat("app-cpu", list.length ? cpu.toFixed(1) : "—", "%", t("app.cpuHint", { n: state.overview?.system.cores ?? "" }), sparkline(history.cpu));
     setStat("app-memory", list.length ? parts.value : "—", list.length ? parts.unit : "", state.overview ? t("app.memoryHint", { total: bytes(state.overview.system.memory.total) }) : "", sparkline(history.memory));
-    document.getElementById("containers")?.replaceChildren(...app.containers.map(containerRow));
+    document.getElementById("containers")?.replaceChildren(containersTable());
   };
   const poll = async () => {
     while (!stopped) {
@@ -621,10 +621,10 @@ function followText(url, log, signal) {
 }
 
 function appLogsTab(app, box) {
-  const log = h("pre", { class: "console page" });
+  const log = uiConsole({ page: true });
   const abort = new AbortController();
   cleanups.push(() => abort.abort());
-  box.replaceChildren(h("div", { class: "console-frame" }, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log));
+  box.replaceChildren(uiConsoleFrame(`docker compose -p ${app.name} logs --follow --tail 200`, log));
   void streamLogs(app, log, abort.signal);
 }
 
@@ -633,21 +633,22 @@ function appLogsTab(app, box) {
 /** The terminal lives in a page of its own (the emulator needs a looser content policy), shown in a frame */
 function terminalFrame(query = {}) {
   const params = new URLSearchParams({ ...query, lang: state.lang });
-  return h("iframe", { class: "term-frame", src: "/terminal.html?" + params, title: t("terminal.title") });
+  return h("iframe", { class: "ui-term-frame", src: "/terminal.html?" + params, title: t("terminal.title") });
 }
 
 function renderTerminal() {
-  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("terminal.title")), h("p", { class: "meta" }, t("terminal.hostHint")))), terminalFrame());
+  shell(pageHead({ title: t("terminal.title"), facts: [t("terminal.hostHint")] }), terminalFrame());
   document.getElementById("view").classList.add("fill");
 }
 
 function appTerminalTab(app, box) {
   const running = app.containers.filter((c) => c.state === "running");
   if (!running.length) return box.replaceChildren(h("p", { class: "muted" }, t("error.terminal.notRunning")));
-  const frame = h("div", { class: "term-holder" });
+  const frame = h("div", { class: "ui-term-holder" });
   const open = (name) => frame.replaceChildren(terminalFrame({ app: app.name, container: name }));
   const pick = running.length > 1 && h("select", { "aria-label": t("terminal.container"), onchange: (e) => open(e.target.value) }, running.map((c) => h("option", { value: c.name }, c.service || c.name)));
-  box.replaceChildren(h("div", { class: "console-frame" }, h("div", { class: "cmd-row" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker exec -it ${running[0].name} sh`), pick), frame));
-  if (pick) pick.addEventListener("change", () => (box.querySelector(".cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
+  const line = uiConsoleFrame(`docker exec -it ${running[0].name} sh`, frame, pick);
+  box.replaceChildren(line);
+  if (pick) pick.addEventListener("change", () => (line.querySelector(".ui-console-cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
   open(running[0].name);
 }

@@ -9,10 +9,10 @@ function appIcon(app, size = "") {
   const title = app.title || app.name || "?";
   let hash = 0;
   for (const ch of app.name ?? title) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  const letter = h("span", { class: `app-icon letter ${size}` }, title.slice(0, 1).toUpperCase());
+  const letter = h("span", { class: `ui-app-icon ui-app-icon-letter${size ? " ui-app-icon-" + size : ""}` }, title.slice(0, 1).toUpperCase());
   letter.style.background = TILE_COLORS[hash % TILE_COLORS.length];
   if (!app.icon) return letter;
-  return h("img", { class: `app-icon ${size}`, src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
+  return h("img", { class: `ui-app-icon${size ? " ui-app-icon-" + size : ""}`, src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
 }
 
 /** The app's own name under the domain (the one that is set, or the local one), when Hata itself is opened by that domain; otherwise null */
@@ -36,83 +36,90 @@ function appAddress(app) {
 
 const isUp = (app) => app.status === "running" || app.status === "partial";
 const appState = (app) => (app.job ? "busy" : app.containers?.some((c) => c.state === "restarting") ? "restarting" : app.status);
-const stateChip = (app) => h("span", { class: "state " + appState(app) }, t("status." + appState(app)));
+const stateChip = (app) => appStateBadge(app);
+/** An app's state as the state of the design system: busy, may update, running, in trouble, stopped */
+function appStateBadge(app) {
+  const st = appState(app);
+  if (app.job) return uiState("info", t("status.busy"));
+  if ((!!app.update || app.newer?.length > 0) && st === "running") return uiState("warn", t("apps.hasUpdate"));
+  return uiState({ running: "ok", partial: "warn", restarting: "warn", busy: "info" }[st] ?? "off", t("status." + st));
+}
 
 // --- Home ---------------------------------------------------------------------------------------
 
 function sparkline(values, max) {
   const top = max ?? Math.max(1, ...values);
   const bars = values.slice(-28).map((v, i, list) => {
-    const bar = h("i", { class: i === list.length - 1 ? "last" : "" });
+    const bar = h("i", { class: i === list.length - 1 ? "ui-spark-last" : "" });
     bar.style.height = Math.max(6, Math.round((v / top) * 100)) + "%";
     return bar;
   });
-  return h("div", { class: "spark", "aria-hidden": "true" }, bars);
+  return h("div", { class: "ui-spark", "aria-hidden": "true" }, bars);
 }
 
-function statCell(id, iconName, label) {
-  return h(
-    "div",
-    { class: "stat", id: "stat-" + id },
-    h("div", { class: "stat-label" }, icon(iconName), label),
-    h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })),
-    h("div", { class: "stat-hint" }, " "),
-  );
-}
+/** A number of a strip (the system's `uiStat`), made once with its id and refilled by `setStat` */
+const statCell = (id, iconName, label) => h("div", { class: "ui-stat", id: "stat-" + id }, h("span", { class: "ui-stat-label" }, icon(iconName), label), h("span", { class: "ui-stat-value" }, h("strong", null, "—"), h("span")), h("span", { class: "ui-stat-chart" }), h("span", { class: "ui-stat-hint" }, " "));
 
 function setStat(id, value, unit, hint, chart, level = "") {
   const el = document.getElementById("stat-" + id);
   if (!el) return;
-  const strong = el.querySelector("strong");
+  const strong = el.querySelector(".ui-stat-value strong");
   strong.textContent = value;
-  strong.className = level;
-  el.querySelector(".unit").textContent = unit;
-  el.querySelector(".stat-hint").textContent = hint || " ";
-  el.querySelector(".stat-chart").replaceChildren(chart ?? "");
+  strong.className = level === "danger" ? "bad" : level;
+  el.querySelector(".ui-stat-value span").textContent = unit;
+  el.querySelector(".ui-stat-hint").textContent = hint || " ";
+  // a little chart of fewer than three points says nothing
+  const few = chart?.classList?.contains("ui-spark") && chart.children.length < 3;
+  el.querySelector(".ui-stat-chart").replaceChildren(few ? "" : (chart ?? ""));
 }
 
 const level = (percent) => (percent >= 95 ? "danger" : percent >= 85 ? "warn" : "");
 
-/** A bar of a share: `percent` of it filled, coloured by how full it is */
-function meterBar(percent, cls = level(percent)) {
-  const fill = h("i", { class: cls });
-  fill.style.width = Math.max(0, Math.min(100, percent)) + "%";
-  return h("div", { class: "bar" }, fill);
-}
+/** A bar of a share: `percent` of it filled, coloured by how full it is (the system's meter); `""` — a plain progress */
+const meterBar = (percent, cls) => uiMeter(percent, { kind: cls === "" ? "progress" : "capacity" });
 
-/** One number of the block of this server: label, the value and its unit, a bar or a little chart, a line under it */
-function kpi(id, iconName, label, key = "", href = "") {
-  return h(
-    href ? "a" : "div",
-    { class: "kpi", id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) },
-    h("div", { class: "kpi-label" }, key ? h("i", { class: "series-key " + key }) : icon(iconName), h("span", { class: "clip" }, label)),
-    h("div", { class: "kpi-value" }, h("strong", null, "—"), h("span", { class: "unit" })),
-    h("div", { class: "kpi-gauge" }),
-    h("div", { class: "kpi-hint" }, " "),
-  );
+/**
+ * One number of this server: on Home a row of the block (`fact`: icon, label, meter, value), on the server's page a
+ * number of the strip (`stat`). Made once with its id, refilled by `setKpi` as the numbers come.
+ */
+function kpi(id, iconName, label, href = "", form = "stat") {
+  const attrs = { id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) };
+  if (form === "fact")
+    return h(href ? "a" : "div", { class: "ui-mfact ui-kpi", ...attrs }, h("span", { class: "ui-mfact-label" }, icon(iconName), h("span", { class: "clip" }, label)), h("span", { class: "ui-mfact-bar" }), h("span", { class: "ui-mfact-value mono" }, "—"));
+  return h(href ? "a" : "div", { class: "ui-stat ui-kpi", ...attrs }, h("span", { class: "ui-stat-label" }, icon(iconName), h("span", { class: "clip" }, label)), h("span", { class: "ui-stat-value" }, h("strong", null, "—"), h("span")), h("span", { class: "ui-stat-chart" }), h("span", { class: "ui-stat-hint" }, " "));
 }
 
 function setKpi(id, value, unit, hint, gauge, cls = "") {
   const el = document.getElementById("kpi-" + id);
   if (!el) return;
-  const strong = el.querySelector("strong");
+  const tone = cls === "danger" ? "bad" : cls;
+  if (el.classList.contains("ui-mfact")) {
+    const v = el.querySelector(".ui-mfact-value");
+    v.textContent = value + (unit && unit !== "%" ? " " : "") + unit;
+    v.className = "ui-mfact-value mono" + (tone ? " " + tone : "");
+    el.querySelector(".ui-mfact-bar").replaceChildren(gauge ?? "");
+    if (hint) el.title = hint;
+    return;
+  }
+  const strong = el.querySelector(".ui-stat-value strong");
   strong.textContent = value;
-  strong.className = cls;
-  el.querySelector(".unit").textContent = unit;
-  el.querySelector(".kpi-hint").textContent = hint || " ";
-  el.querySelector(".kpi-gauge").replaceChildren(gauge ?? "");
+  strong.className = tone;
+  el.querySelector(".ui-stat-value span").textContent = unit;
+  el.querySelector(".ui-stat-hint").textContent = hint || " ";
+  el.querySelector(".ui-stat-chart").replaceChildren(gauge ?? "");
 }
 
-/** The block of this server's numbers: made once, refilled as the numbers come */
+/** The numbers of this server, one to a row: CPU, memory, disk, network, temperature */
+const ownKpis = (form) => [kpi("cpu", "cpu", t("sys.cpu"), isAdmin() ? "#/machines/load/here" : "", form), kpi("memory", "memory", t("sys.memory"), isAdmin() ? "#/machines/load/here" : "", form), kpi("disk", "disk", t("sys.disk"), "", form), kpi("network", "network", t("sys.network"), "", form), kpi("temp", "temp", t("sys.temperature"), "", form)];
+
+/** The block of this server's numbers on Home: made once, refilled as the numbers come */
 function statsBlock() {
   return widget(
     "stats",
-    h(
-      "section",
-      { class: "card numbers" },
-      h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
-      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", isAdmin() ? "#/machines/load/here" : ""), kpi("memory", "memory", t("sys.memory"), "s1", isAdmin() ? "#/machines/load/here" : ""), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
-      h("div", { class: "trend", id: "own-trend" }),
+    uiCard(
+      { title: h("span", { id: "own-name" }, state.overview?.system?.hostname ?? "…"), count: t("home.thisServer"), actions: h("span", { class: "ui-row-time", id: "own-up" }), cls: "ui-numbers" },
+      h("div", { class: "ui-mfacts" }, ownKpis("fact")),
+      h("div", { class: "ui-trend", id: "own-trend" }),
     ),
   );
 }
@@ -138,14 +145,14 @@ function paintTrend(trend) {
   const n = trend.cpu.length;
   const points = trend.cpu.map((cpu, i) => ({ t: trend.at - (n - 1 - i) * MINUTE_MS, cpu, memory: trend.memory[i] }));
   const series = [
-    { cls: "s2", label: t("sys.cpu"), value: (p) => p.cpu },
-    { cls: "s1", label: t("sys.memory"), value: (p) => p.memory },
+    { cls: "ui-chart-s2", label: t("sys.cpu"), value: (p) => p.cpu },
+    { cls: "ui-chart-s1", label: t("sys.memory"), value: (p) => p.memory },
   ];
   put(
     box,
-    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, h("span", { class: "grow" }, t("home.trend", { n })), series.map((s) => h("span", null, h("i", { class: "series-key " + s.cls }), s.label))),
+    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "ui-trend-head muted small" }, h("span", { class: "grow" }, t("home.trend", { n })), series.map((s) => h("span", null, h("i", { class: "ui-chart-key " + s.cls }), s.label))),
     // in a card of Home the chart takes the room the card has; elsewhere its usual height
-    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".pg-card") ? Math.max(90, box.clientHeight - 54) : 120, head: false }),
+    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".ui-grid-card") ? Math.max(90, box.clientHeight - 54) : 160, head: false }),
   );
 }
 
@@ -159,27 +166,27 @@ function renderSystem() {
   if (own) own.textContent = s.hostname;
   const up = document.getElementById("own-up");
   if (up) up.textContent = t("sys.uptime", { time: duration(s.uptime) });
-  if (meta) meta.replaceChildren(...[s.hostname, location.host, "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  if (meta) meta.textContent = [s.hostname, location.host, "Hata " + state.version].join(" · ");
 
-  setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), meterBar(s.cpu ?? 0, ""));
+  setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), uiMeter(s.cpu ?? 0, { kind: "load" }));
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const used = bytesParts(mem.used);
-  setKpi("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), meterBar(memPercent, level(memPercent) || "info"), level(memPercent));
+  setKpi("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), uiMeter(memPercent, { kind: "load" }), level(memPercent));
   const disk = s.disks[s.disks.length - 1];
   const diskCell = document.getElementById("kpi-disk");
   if (diskCell) diskCell.hidden = !disk;
   if (disk) {
     const percent = Math.round((disk.used / disk.total) * 100);
-    setKpi("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), meterBar(percent, level(percent) || "ok"), level(percent));
-    const label = diskCell.querySelector(".kpi-label .clip");
+    setKpi("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), uiMeter(percent), level(percent));
+    const label = diskCell.querySelector(".clip");
     if (label) label.textContent = `${t("sys.disk")} ${disk.path}`;
   }
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
   setKpi("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
   const temp = document.getElementById("kpi-temp");
   if (temp) temp.hidden = s.temperature == null;
-  if (s.temperature != null) setKpi("temp", String(s.temperature), "°C", t("sys.cpu"), meterBar(s.temperature, s.temperature >= 85 ? "warn" : ""), s.temperature >= 85 ? "warn" : "");
+  if (s.temperature != null) setKpi("temp", String(s.temperature), "°C", t("sys.cpu"), uiMeter(s.temperature, { kind: "load" }), s.temperature >= 85 ? "warn" : "");
   paintTrend(s.trend);
 }
 
@@ -235,27 +242,27 @@ function tileIcon(item, size = "") {
   const target = tileTarget(item);
   if (item.type === "app") return appIcon(target ?? { name: item.name }, size);
   if (item.type === "link") return appIcon({ name: item.id, title: tileTitle(item), icon: linkIcon(item) }, size);
-  if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
-  if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
-  if (item.type === "ha") return h("span", { class: `app-icon plus ${size}` }, icon(haIcon(target?.state ?? { domain: item.entity.split(".")[0] })));
-  if (item.type === "widget") return h("span", { class: `app-icon plus ${size}` }, icon(svcConnections().find((c) => c.id === item.server)?.icon ?? "plug"));
-  return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
+  if (item.type === "files") return uiGlyph(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder", size);
+  if (item.type === "builtin") return uiGlyph(item.id === "store" ? "store" : "plus", size);
+  if (item.type === "ha") return uiGlyph(haIcon(target?.state ?? { domain: item.entity.split(".")[0] }), size);
+  if (item.type === "widget") return uiGlyph(svcConnections().find((c) => c.id === item.server)?.icon ?? "plug", size);
+  return h("span", { class: "ui-app-icon ui-app-icon-stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
 /** What every tile is made of: the picture with the marks beside it, the name (two lines at most), how it is, where */
 function tileContent(item, title, sub, { badges = null, where = null, big = "" } = {}) {
   return [
-    h("span", { class: "tile-head" }, tileIcon(item), big && h("span", { class: "tile-big" }, big), h("span", { class: "tile-badges" }, badges)),
-    h("span", { class: "tile-name", title }, title),
+    h("span", { class: "ui-home-tile-head" }, tileIcon(item), big && h("span", { class: "ui-home-tile-big" }, big), h("span", { class: "ui-home-tile-badges" }, badges)),
+    h("span", { class: "ui-home-tile-name", title }, title),
     // one line under every name: what does not fit is cut, and the whole of a plain text is in its title
-    h("span", { class: "tile-sub", ...(typeof sub === "string" ? { title: sub } : {}) }, sub),
+    h("span", { class: "ui-home-tile-sub", ...(typeof sub === "string" ? { title: sub } : {}) }, sub),
     where,
   ];
 }
 
 /** The thin bar of a tile whose app is being worked on; `install` also tells it apart by its number */
 function tileBar(job, install) {
-  const bar = h("span", { class: "tile-bar" }, h("i"));
+  const bar = h("span", { class: "ui-home-tile-bar" }, h("i"));
   bar.dataset.tileJob = job.id;
   paintTileBar(bar, job, install);
   return bar;
@@ -263,7 +270,7 @@ function tileBar(job, install) {
 
 function paintTileBar(bar, job, install = true) {
   const pct = install && job.progress?.step === "download" ? jobPercent(job.progress) : null;
-  bar.classList.toggle("moving", pct === null);
+  bar.classList.toggle("ui-home-tile-bar-moving", pct === null);
   bar.firstChild.style.width = pct === null ? "" : pct + "%";
 }
 
@@ -293,14 +300,14 @@ function tile(item) {
     const url = isUp(app) ? machineAppUrl(target.machine, app) : null;
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
-    sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
-    badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))];
+    sub = [uiDot(st), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
+    badges = [app.guarded && uiTileMark("lock", t("access.protected"))];
     if (installing) {
       cls = "installing";
-      sub = [h("i", { class: "dot" }), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
+      sub = [uiDot(), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
     }
-    where = !installing && h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
-    side = admin && h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
+    where = !installing && h("span", { class: "ui-home-tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
+    side = admin && h("a", { class: "ui-home-tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
   } else if (item.type === "app") {
     const app = target;
     const installing = app.job?.kind === "install";
@@ -319,15 +326,15 @@ function tile(item) {
     sub = app.failedJob
       ? [icon("x"), t("jobs.couldNotShort")]
       : installing
-        ? [h("i", { class: "dot" }), h("span", { class: "jt-short clip", "data-job-short": app.job.id }, jobShort(app.job))]
-        : [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
+        ? [uiDot(), h("span", { class: "clip", "data-job-short": app.job.id }, jobShort(app.job))]
+        : [uiDot(st), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     const line = st === "running" && appServiceLine(app);
-    if (line) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, line));
-    badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
+    if (line) where = h("span", { class: "ui-home-tile-where" }, h("span", { class: "clip" }, line));
+    badges = [app.protected && uiTileMark("lock", t("access.protected")), (app.update || app.newer?.length > 0) && isAdmin() && uiTileMark("up", t(app.update ? "app.storeUpdate" : "app.newer"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
-      ? h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
-      : h("a", { class: "tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
+      ? h("button", { type: "button", class: "ui-home-tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
+      : h("a", { class: "ui-home-tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
   } else if (item.type === "ha") {
     ({ cls, side, main: haMain } = haTile(item, target, title));
   } else if (item.type === "link") {
@@ -337,8 +344,8 @@ function tile(item) {
     // a link for the TV: one press shows it on the server's screen (for whoever may; for the rest it is a usual link)
     const toScreen = item.screen && isAdmin() && hasModule("tv");
     if (toScreen) onMain = () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: title })));
-    badges = h("span", { class: "lock", title: toScreen ? t("home.linkScreen") : null }, icon(toScreen ? "tv" : "external"));
-    side = isAdmin() && h("button", { type: "button", class: "tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
+    badges = uiTileMark(toScreen ? "tv" : "external", toScreen ? t("home.linkScreen") : null);
+    side = isAdmin() && h("button", { type: "button", class: "ui-home-tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "builtin") {
     // Hata's own tiles: the store opens like an app, "Add" asks what to add
     href = "#/store";
@@ -355,15 +362,16 @@ function tile(item) {
     sub = t("home.items", { n: shown });
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
-  if (admin && !side && !isAddTile(item) && !tileHasNoMenu(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
+  if (admin && !side && !isAddTile(item) && !tileHasNoMenu(item)) side = h("button", { type: "button", class: "ui-home-tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => tileMenu(item, e.currentTarget) }, icon("more"));
   const content = [...tileContent(item, title, sub, { badges, where }), bar];
   const key = tileKey(item);
   const main = haMain ??
-    (onMain ? h("button", { type: "button", class: "tile-main", onclick: onMain }, content) : item.type === "folder" || isAddTile(item)
-      ? h("button", { type: "button", class: "tile-main", onclick: () => (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
-      : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
-  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
-  return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key, oncontextmenu: (e) => {
+    (onMain ? h("button", { type: "button", class: "ui-home-tile-main", onclick: onMain }, content) : item.type === "folder" || isAddTile(item)
+      ? h("button", { type: "button", class: "ui-home-tile-main", onclick: () => (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
+      : h("a", { class: "ui-home-tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
+  const tileCls = homeTileClass(item.type, cls);
+  if (!admin) return h("div", { class: tileCls, "data-key": key }, main, side);
+  return h("div", { class: tileCls, "data-key": key, oncontextmenu: (e) => {
         if (e.pointerType === "touch") return;
         e.preventDefault();
         const at = { x: e.clientX, y: e.clientY };
@@ -543,14 +551,14 @@ function summaryWidget(item, x, w) {
   const shown = rows.slice(0, room);
   return h(
     "a",
-    { class: "tile-main widget-body", href: `#/service/${x.id}`, draggable: false },
-    h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, x.name)),
+    { class: "ui-home-tile-main ui-widget", href: `#/service/${x.id}`, draggable: false },
+    h("span", { class: "ui-widget-head" }, tileIcon(item), h("span", { class: "ui-widget-title clip" }, x.name)),
     x.online
       ? [
           // a number with its words says what it counts; the line of all numbers then says nothing new
-          h("span", { class: "widget-speeds" + (labelled ? " labelled" : "") }, w.numbers.map((n) => h("span", null, h("b", null, svcFormat(x.values[n.value], n.as) || "—"), n.label && h("small", null, svcText(n.label))))),
+          h("span", { class: "ui-widget-numbers" + (labelled ? " ui-widget-numbers-labelled" : "") }, w.numbers.map((n) => h("span", null, h("b", null, svcFormat(x.values[n.value], n.as) || "—"), n.label && h("small", null, svcText(n.label))))),
           !labelled && !(tall === 1 && room > 0) && spec && h("span", { class: "muted small clip" }, svcNumbers(spec, x.values)),
-          shown.length > 0 && h("span", { class: "widget-torrents" }, shown.map((row) => widgetRow(spec, w.list, row))),
+          shown.length > 0 && h("span", { class: "ui-widget-list" }, shown.map((row) => widgetRow(spec, w.list, row))),
           room > 0 && rows.length > shown.length && h("span", { class: "muted small" }, t("attention.moreItems", { n: rows.length - shown.length })),
           room > 0 && w.list && !rows.length && h("span", { class: "muted small" }, t("service.nothing")),
         ]
@@ -561,8 +569,8 @@ function summaryWidget(item, x, w) {
 /** A row of a summary's list: its name, then its state as a coloured word or a note, and its bar */
 function widgetRow(spec, list, row) {
   const said = list.state ? spec?.words[list.state.words]?.[String(row[list.state.field])] : null;
-  const side = said ? h("span", { class: "with-dot small" }, h("i", { class: "dot " + (said.tone || "stopped") }), svcText(said.label)) : list.note ? h("span", { class: "muted small" }, svcFill(list.note, row)) : null;
-  return h("span", { class: "widget-torrent" }, side ? h("span", { class: "widget-row" }, h("span", { class: "small clip" }, String(row[list.title] ?? "")), side) : h("span", { class: "small clip" }, String(row[list.title] ?? "")), list.bar && meterBar(Number(row[list.bar]) || 0, ""));
+  const side = said ? uiDotWords(said.tone || "stopped", svcText(said.label)) : list.note ? h("span", { class: "muted small" }, svcFill(list.note, row)) : null;
+  return h("span", { class: "ui-widget-item" }, side ? h("span", { class: "ui-widget-line" }, h("span", { class: "small clip" }, String(row[list.title] ?? "")), side) : h("span", { class: "small clip" }, String(row[list.title] ?? "")), list.bar && meterBar(Number(row[list.bar]) || 0, ""));
 }
 
 /** How tall a picture a picture's card asks for */
@@ -584,9 +592,9 @@ function pictureWidget(item, x, w) {
   } else if (on) shown = widgetPicture(`still:${item.id}`, svcPicture(x.id, w.picture, item.row, height, Date.now()), item.row);
   return h(
     "button",
-    { type: "button", class: "tile-main widget-picture", onclick: open },
-    shown ?? h("span", { class: "camera-off" }, icon(x.icon)),
-    h("span", { class: "widget-caption" }, h("i", { class: "dot " + (on && row.online !== false ? "running" : "stopped") }), h("span", { class: "clip" }, item.row ?? "")),
+    { type: "button", class: "ui-home-tile-main ui-widget-picture", onclick: open },
+    shown ?? h("span", { class: "ui-widget-nopicture" }, icon(x.icon)),
+    h("span", { class: "ui-widget-caption" }, uiDot(on && row.online !== false ? "running" : "stopped"), h("span", { class: "clip" }, item.row ?? "")),
   );
 }
 
@@ -597,13 +605,13 @@ function picturesWidget(item, x, w) {
   const latest = (x.lists[w.of] ?? []).slice(0, cols * (item.h ?? 1));
   const el = h(
     "a",
-    { class: "tile-main widget-events", href: `#/service/${x.id}`, draggable: false },
+    { class: "ui-home-tile-main ui-widget-pictures", href: `#/service/${x.id}`, draggable: false },
     latest.length && spec
       ? latest.map((row) => {
           const key = svcKey(spec, w.of, row);
-          return h("span", { class: "widget-picture" }, widgetPicture(`row:${item.id}:${key}:${item.h ?? 1}`, svcPicture(x.id, w.picture, key, Math.min(720, (item.h ?? 1) * 280)), String(row[w.caption] ?? "")), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, String(row[w.caption] ?? "")), w.note && h("span", { class: "muted" }, svcFill(w.note, row))));
+          return h("span", { class: "ui-widget-picture" }, widgetPicture(`row:${item.id}:${key}:${item.h ?? 1}`, svcPicture(x.id, w.picture, key, Math.min(720, (item.h ?? 1) * 280)), String(row[w.caption] ?? "")), h("span", { class: "ui-widget-caption" }, h("span", { class: "clip" }, String(row[w.caption] ?? "")), w.note && h("span", { class: "muted" }, svcFill(w.note, row))));
         })
-      : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, svcText(w.label))), h("span", { class: "muted small" }, t("service.nothing"))),
+      : h("span", { class: "ui-widget" }, h("span", { class: "ui-widget-head" }, tileIcon(item), h("span", { class: "ui-widget-title clip" }, svcText(w.label))), h("span", { class: "muted small" }, t("service.nothing"))),
   );
   if (latest.length) {
     el.style.gridTemplateColumns = `repeat(${Math.min(cols, latest.length)}, minmax(0, 1fr))`;
@@ -614,17 +622,17 @@ function picturesWidget(item, x, w) {
 
 function widgetTile(item, x) {
   const w = widgetSpec(item);
-  const body = !w ? h("span", { class: "tile-main widget-body muted small" }, t("service.widgetGone")) : w.kind === "summary" ? summaryWidget(item, x, w) : w.kind === "picture" ? pictureWidget(item, x, w) : picturesWidget(item, x, w);
+  const body = !w ? h("span", { class: "ui-home-tile-main ui-widget muted small" }, t("service.widgetGone")) : w.kind === "summary" ? summaryWidget(item, x, w) : w.kind === "picture" ? pictureWidget(item, x, w) : picturesWidget(item, x, w);
   const title = tileTitle(item);
   return h(
     "div",
-    { class: `tile kind-widget view-${item.view}`, "data-key": tileKey(item), oncontextmenu: (e) => {
+    { class: homeTileClass("widget", "view-" + item.view), "data-key": tileKey(item), oncontextmenu: (e) => {
         if (e.pointerType === "touch") return;
         e.preventDefault();
         tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() },
     body,
-    h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more")),
+    h("button", { type: "button", class: "ui-home-tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => tileMenu(item, e.currentTarget) }, icon("more")),
   );
 }
 
@@ -816,11 +824,11 @@ function gridBar() {
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "grow" }), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "ui-grid-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "grow" }), h("div", { class: "ui-grid-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
-  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { class: "small", onclick: gridEdit }, "grid"));
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -844,17 +852,26 @@ function gridBody(card, box) {
 
 /** A list in a block shows what fits; the rest goes under its "N more" */
 function fitBlock(block) {
-  const list = block?.querySelector(".fits");
+  // a list that gives way: `ui-fits` (its "N more" `ui-fits-more`); the old names until every part has moved
+  const list = block?.querySelector(".ui-fits, .fits");
   if (!list) return;
   let left = 0;
-  const more = block.querySelector(".fits-more");
-  while (list.children.length > 1 && block.scrollHeight > block.clientHeight + 1) {
+  const more = block.querySelector(".ui-fits-more, .fits-more");
+  // the list itself may be cut by its card (it gives way to the link under it), so both are measured
+  const over = () => block.scrollHeight > block.clientHeight + 1 || list.scrollHeight > list.clientHeight + 1;
+  while (list.children.length > 1 && over()) {
     list.lastElementChild.remove();
     left++;
     if (more) {
       more.hidden = false;
       more.querySelector("span").textContent = t("attention.moreItems", { n: left });
     }
+  }
+  // the one item left is still higher than the card: its words are cut short, then left out, so the link
+  // under the list never stands over it
+  for (const step of ["squeezed", "bare"]) {
+    if (!over()) break;
+    list.classList.add(list.classList.contains("ui-fits") ? "ui-fits-" + step : step);
   }
 }
 
@@ -867,7 +884,7 @@ function paintGrid() {
   if (!free) gridUi.arranging = false;
   gridLoad();
   gridBar();
-  pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
+  pg.className = "ui-grid" + (gridUi.arranging ? " ui-grid-arranging" : "") + (free ? "" : " ui-grid-flowing");
   pg.style.setProperty("--pg-cols", String(cols));
   const cards = state.overview.dashboard.cards;
   const shown = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
@@ -877,7 +894,7 @@ function paintGrid() {
   const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
     const x = i % cols;
     const y = Math.floor(i / cols);
-    const cell = h("button", { type: "button", class: "pg-cell", title: t("grid.addHere"), "aria-label": t("grid.addHere"), onclick: () => gridAddAt(x, y) }, icon("plus"));
+    const cell = h("button", { type: "button", class: "ui-grid-cell", title: t("grid.addHere"), "aria-label": t("grid.addHere"), onclick: () => gridAddAt(x, y) }, icon("plus"));
     cell.style.gridArea = `${Math.floor(i / cols) + 1} / ${(i % cols) + 1}`;
     return cell;
   }) : [];
@@ -897,7 +914,7 @@ function gridCard(card, free) {
   const box = gridUi.at[tileKey(card)];
   const body = gridBody(card, box);
   if (!body) return null;
-  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn pg-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => askTake(card) }, icon("x")));
+  const el = h("div", { class: "ui-grid-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `ui-grid-grip ui-grid-grip-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn ui-grid-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => askTake(card) }, icon("x")));
   gridPosition(el, box, free);
   if (gridUi.arranging) el.addEventListener("pointerdown", (e) => gridStart(e, card, el));
   el.addEventListener("contextmenu", (e) => {
@@ -914,8 +931,8 @@ function gridCard(card, free) {
 /** Moving a card by any part of it, or pulling one of its edges and corners */
 function gridStart(e, card, el) {
   // a press on the × is the ×'s own: it asks, it does not move the card
-  if (e.button !== 0 || e.target.closest(".pg-remove")) return;
-  const grip = e.target.closest(".pg-side");
+  if (e.button !== 0 || e.target.closest(".ui-grid-remove")) return;
+  const grip = e.target.closest(".ui-grid-grip");
   const pg = document.getElementById("pg");
   const rect = pg.getBoundingClientRect();
   const gap = 12;
@@ -955,7 +972,7 @@ function gridMove(e, drag) {
   if (!drag.moved) {
     if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
     drag.moved = true;
-    drag.el.classList.add("pg-moving");
+    drag.el.classList.add("ui-grid-moving");
   }
   const old = drag.base[drag.key];
   const { cols, limits } = state.overview.grid;
@@ -992,13 +1009,13 @@ function gridMove(e, drag) {
     box = { ...old, x: Math.max(0, Math.min(cols - old.w, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - drag.grabX)), y: Math.max(0, Math.floor((e.clientY - top) / drag.cell.h) - drag.grabY) };
   }
   gridUi.at = gridPlace(drag.base, drag.key, box);
-  for (const el of document.querySelectorAll(".pg-card")) gridPosition(el, gridUi.at[el.dataset.card], true);
+  for (const el of document.querySelectorAll(".ui-grid-card")) gridPosition(el, gridUi.at[el.dataset.card], true);
 }
 
 function gridHint(drag, box) {
   const [minW, minH, maxW, maxH] = state.overview.grid.limits[drag.kind] ?? [1, 1, state.overview.grid.cols, 6];
-  let hint = drag.el.querySelector(".pg-hint");
-  if (!hint) drag.el.append((hint = h("span", { class: "pg-hint" })));
+  let hint = drag.el.querySelector(".ui-grid-hint");
+  if (!hint) drag.el.append((hint = h("span", { class: "ui-grid-hint" })));
   hint.textContent = t("grid.hint", { size: `${box.w}×${box.h}`, min: `${minW}×${minH}`, max: `${maxW}×${maxH}` });
 }
 
@@ -1130,7 +1147,7 @@ function linkDialog(link) {
       field(t("home.linkUrl"), url),
       field(t("home.linkTitle"), title, t("home.linkTitleHint")),
       field(t("home.linkIcon"), picture, t("home.linkIconHint")),
-      screen && h("label", { class: "check" }, screen, h("span", null, h("strong", null, t("home.linkScreen")), h("span", { class: "muted small block" }, t("home.linkScreenHint")))),
+      screen && uiCheck(t("home.linkScreen"), screen, t("home.linkScreenHint")),
       error,
       h(
         "footer",
@@ -1163,11 +1180,15 @@ function tileMenu(item, point = null) {
   const layout = state.overview.dashboard;
   const at = locate(layout, key);
   if (!at) return;
-  let dialog;
-  const entry = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    point ? "menu dropdown" : "menu",
-    h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), at.folder && h("span", { class: "muted small" }, at.folder.title || t("home.folder")))),
+  // an entry of the menu; `danger` — it takes the card off
+  const entry = (label, iconName, action, danger = "") => ({ label, icon: iconName, run: action, danger: !!danger });
+  const header = h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), at.folder && h("span", { class: "muted small" }, at.folder.title || t("home.folder"))));
+  // opened by its button: under it; else where the pointer is, or over the middle of the page
+  const where = point ?? { x: innerWidth / 2 - 130, y: innerHeight / 3 };
+  menuAt(
+    where,
+    header,
+    [
     item.type === "link" && isAdmin() && hasModule("tv") && entry(t("home.linkOnTv"), "tv", () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: tileTitle(item) })))),
     item.type === "link" && entry(t("home.linkNewTab"), "external", () => window.open(item.url, "_blank", "noopener,noreferrer")),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
@@ -1193,8 +1214,8 @@ function tileMenu(item, point = null) {
     })),
     item.type === "widget" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => askRemoveCard(item, () => pinFolder(item.path, false))),
+    ].flat(),
   );
-  if (point) placeAt(dialog, point);
 }
 
 /** What can be put on Home, by sections, with a search over all of them */
@@ -1220,7 +1241,7 @@ function addSections() {
     return there ? tileKey(there) : null;
   });
   const pinned = () => (o.folders ?? []).map((folder) => folder.path);
-  const dot = (cls) => h("i", { class: "dot " + cls });
+  const dot = (cls) => uiDot(cls);
   return [
     { id: "apps", icon: "grid", rows: [action(t("home.addApp"), t("home.addAppHint"), icon("store"), t("common.open"), () => go("#/store")), o.importable > 0 && action(t("home.import"), t("home.importHint", { n: o.importable }), icon("download"), t("common.open"), () => go("#/import"))].filter(Boolean) },
     {
@@ -1261,19 +1282,19 @@ function addSections() {
 function addDialog(closed) {
   let dialog;
   let ran = false;
-  const nav = h("nav", { class: "cats fold add-nav" });
-  const main = h("div", { class: "add-main" });
+  let nav = h("nav");
+  const main = h("div", { class: "ui-panes-main" });
   const row = (one) => {
     const there = one.placed?.();
-    return h(
-      "div",
-      { class: "add-row" },
-      h("span", { class: "add-lead" }, one.lead),
-      h("span", { class: "add-text" }, h("strong", { class: "clip" }, one.title), h("span", { class: "muted small clip" }, one.sub)),
-      one.placed
-        ? h("span", { class: "add-do" }, there && h("span", { class: "muted small add-on" }, icon("check", "ok"), t("add.onHome")), button(t(there ? "add.remove" : "home.add"), { class: "small", onclick: async () => (await (there ? one.remove() : one.add()), paint()) }, there ? null : "plus"))
-        : h("span", { class: "add-do" }, button(one.label, { class: "small", onclick: () => ((ran = true), dialog.close(), one.run()) })),
-    );
+    return uiRow({
+      lead: h("span", { class: "ui-lead" }, one.lead),
+      name: one.title,
+      sub: one.sub,
+      state: there ? uiState("ok", t("add.onHome")) : null,
+      action: one.placed
+        ? button(t(there ? "add.remove" : "home.add"), { class: "small", onclick: async () => (await (there ? one.remove() : one.add()), paint()) }, there ? null : "plus")
+        : button(one.label, { class: "small", onclick: () => ((ran = true), dialog.close(), one.run()) }),
+    });
   };
   const counted = (section) => {
     const rows = section.rows.filter((one) => one.placed);
@@ -1282,19 +1303,22 @@ function addDialog(closed) {
   const paint = () => {
     const sections = addSections();
     if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
-    const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), section.label ?? t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
-    const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
-    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: storeKinds().length > 0 ? "#/store" : "#/house", onclick: () => ((state.storeFilter = { query: "", category: storeKinds().length > 0 ? "@" : "" }), dialog.close()) }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
+    const entry = (section) => ({ label: section.label ?? t("add.section." + section.id), icon: section.icon, sub: counted(section), active: section.id === addUi.section && !addUi.find, run: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) });
+    const titled = (group) => ({ title: group ? t("add.group." + group) : null, items: sections.filter((one) => (one.group ?? "") === group).map(entry) });
+    const connect = { label: t("add.connect"), icon: "plus", href: storeKinds().length > 0 ? "#/store" : "#/house", run: () => ((state.storeFilter = { query: "", category: storeKinds().length > 0 ? "@" : "" }), dialog.close()) };
+    const fresh = uiSideNav([titled(""), titled("state"), { ...titled("integrations"), items: [...titled("integrations").items, connect] }], { cls: "ui-panes-nav" });
+    nav.replaceWith(fresh);
+    nav = fresh;
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
-      return put(main, found.length ? found.map(row) : h("p", { class: "muted add-none" }, t("add.none", { text: addUi.find.trim() })));
+      return put(main, found.length ? h("div", { class: "ui-rows" }, found.map(row)) : uiEmpty({ text: t("add.none", { text: addUi.find.trim() }) }));
     }
     const section = sections.find((one) => one.id === addUi.section);
-    put(main, h("div", { class: "add-head" }, h("h3", null, section.label ?? t("add.section." + section.id)), h("p", { class: "muted small" }, section.label ? t("add.lead.service") : t("add.lead." + section.id))), section.rows.map(row));
+    put(main, h("div", { class: "ui-panes-head" }, uiSubhead({ title: section.label ?? t("add.section." + section.id), lead: section.label ? t("add.lead.service") : t("add.lead." + section.id) })), h("div", { class: "ui-rows" }, section.rows.map(row)));
   };
   const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
-  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), h("label", { class: "add-find" }, icon("search"), field), h("div", { class: "add-body" }, nav, main));
+  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), uiSearchBox(field), h("div", { class: "ui-panes" }, nav, main));
   if (closed) dialog.addEventListener("close", () => closed(ran));
   paint();
   field.focus();
@@ -1311,20 +1335,22 @@ async function diskPickDialog(pinned) {
   let dialog;
   const row = (d) => {
     const on = pinned.includes(d.path);
-    return h(
-      "button",
-      { type: "button", class: "menu-item disk-pick", disabled: on, onclick: async () => {
-        dialog.close();
-        await pinFolder(d.path, true, true, volumeName(d));
-      } },
-      h("span", { class: "app-icon plus" }, icon(d.network ? "globe" : "disk")),
-      h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, volumeName(d)), on ? h("span", { class: "muted small" }, t("home.diskThere")) : d.total ? diskRoom(d) : h("span", { class: "muted small mono" }, d.path)),
-    );
+    return uiRow({
+      lead: { icon: d.network ? "globe" : "disk" },
+      name: volumeName(d),
+      sub: on ? t("home.diskThere") : d.total ? diskRoom(d) : h("span", { class: "mono" }, d.path),
+      onclick: on
+        ? null
+        : async () => {
+            dialog.close();
+            await pinFolder(d.path, true, true, volumeName(d));
+          },
+    });
   };
   dialog = openDialog(
     "menu",
     h("header", null, h("h2", null, t("home.addDiskTitle"))),
-    disks.length ? disks.map(row) : h("p", { class: "muted" }, t("home.noDisks")),
+    disks.length ? h("div", { class: "ui-rows" }, disks.map(row)) : uiEmpty({ text: t("home.noDisks") }),
     h("footer", null, closeButton(() => dialog)),
   );
 }
@@ -1333,7 +1359,7 @@ async function diskPickDialog(pinned) {
 
 function openFolder(id) {
   if (homeUi.folder) return;
-  const body = h("div", { class: "tiles", "data-folder": id });
+  const body = h("div", { class: "ui-home-tiles", "data-folder": id });
   const head = h("h2", { class: "clip grow" });
   const rename = h("button", { type: "button", class: "icon-btn", title: t("files.rename"), "aria-label": t("files.rename"), onclick: () => renameFolderDialog(homeUi.folder.item) }, icon("edit"));
   const dialog = openDialog("wide tile-folder", h("header", null, head, rename, closeX(() => dialog)), body);
@@ -1365,13 +1391,16 @@ function attentionWords(item) {
   if (item.code === "load.cpu" && item.detail.kind === "sessions") detail.name = t("load.sessionsOf", { user: item.detail.name });
   if (item.code === "load.cpu" && item.detail.kind === "service" && LOAD_UNITS[item.detail.name]) detail.name = t(LOAD_UNITS[item.detail.name]);
   const base = "attention." + item.code;
+  // an item of a kind this version no longer has (kept hidden from an older one): its own words, never a key
+  if (!has(base + ".title")) return { title: String(detail.title || detail.name || detail.kind || item.code), text: String(detail.text ?? "") };
   return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
 }
 
 const attentionIcon = (code) => ATTENTION_ICONS[code.split(".")[0]] ?? "alert";
 
 /** Asks before something that cannot be taken back by a click, does it, says a refusal in the window and looks again */
-function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash" }) {
+/** Asks before something is done: `extra` — a part of the question (a tick that goes with it) */
+function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash", extra = null }) {
   let dialog;
   const error = h("p", { class: "error", role: "alert" });
   const go = button(label, {
@@ -1394,7 +1423,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       }
     },
   }, iconName);
-  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), extra, error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
 }
 
 function attentionItem(item) {
@@ -1481,24 +1510,22 @@ function attentionItem(item) {
     isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
-  const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
-  return h(
-    "div",
-    {
-      class: "attention-item " + item.severity,
-      menu: openMore,
-      // on a phone the buttons do not fit beside the words: the item itself is the button
-      onclick: (e) => {
-        if (!phone.matches || e.target.closest("a, button")) return;
-        const first = e.currentTarget.querySelector(".row-actions :is(a, button)");
-        if (first) first.click();
-        else openMore({ x: e.clientX, y: e.clientY });
-      },
-    },
-    h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
-    h("p", { class: "muted small" }, text),
-    buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
-  );
+  // one action at hand — what does the thing, else the first way to it; the rest in "⋯" (the design system's rule)
+  const header = menuHeader(title, null, attentionIcon(item.code));
+  const nodes = below.filter((x) => x instanceof Node);
+  const entries = below.filter((x) => !(x instanceof Node));
+  const way = !nodes.length && entries.find((x) => x.href);
+  const action = nodes[0] ?? (way ? h("a", { class: "btn small", href: way.href }, icon(way.icon ?? "external"), h("span", null, way.label)) : null);
+  const rest = [...nodes.slice(1).map((b) => ({ label: b.textContent, icon: "next", run: () => b.click() })), ...entries.filter((x) => x !== way)];
+  const openMore = rest.length ? (at) => menuAt(at, header, rest) : undefined;
+  const row = uiRow({ lead: { icon: attentionIcon(item.code), tone: { warn: "warn", danger: "bad", info: "info" }[item.severity] ?? null }, name: title, sub: text, action, more: rest.length ? rest : null, menu: openMore, cls: "ui-attention ui-attention-" + item.severity });
+  // on a phone the button does not fit beside the words: the row itself is pressed
+  row.addEventListener("click", (e) => {
+    if (!phone.matches || e.target.closest("a, button")) return;
+    if (action) action.click();
+    else openMore?.({ x: e.clientX, y: e.clientY });
+  });
+  return row;
 }
 
 /**
@@ -1514,35 +1541,23 @@ function splitActions(entries, header) {
   const rest = more.filter((x) => x !== way);
   if (!rest.length) return { buttons: main, openMore: undefined };
   const openMore = (at) => menuAt(at, header, rest);
-  const opener = (e) => {
-    const r = e.currentTarget.closest(".split").getBoundingClientRect();
-    openMore({ x: r.left, y: r.bottom + 4 });
-  };
-  const first = main[0];
-  if (first) main[0] = h("span", { class: "split" }, first, button("", { class: "small split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
-  else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
-  return { buttons: main, openMore };
+  // the rest is a "⋯" of its own beside the main button (the design system's rule), never an arrow joined to it
+  return { buttons: [...main, uiMore(rest, { size: "s", header })], openMore };
 }
 
 /**
- * A window's or a row's actions: one button for the main thing and the rest (menu entries) under an arrow joined to
- * it — several buttons side by side wrap into a heap. Without a main thing the arrow's button says "More".
+ * A window's or a row's actions: one button for the main thing and the rest (menu entries) in a "⋯" beside it —
+ * several buttons side by side wrap into a heap. Without a main thing only the "⋯" stays.
  */
 function oneAndMore(first, rest, kind = "") {
   const entries = rest.filter(Boolean);
   if (!entries.length) return first;
-  const opener = (e) => {
-    // a row that opens something on a click must not take this one for its own
-    e.stopPropagation();
-    const r = e.currentTarget.closest(".split").getBoundingClientRect();
-    menuAt({ x: r.left, y: r.bottom + 4 }, null, entries);
-  };
-  return h("span", { class: "split" }, first, button(first ? "" : t("attention.more"), { class: kind + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+  return h("span", { class: "ui-one-more" }, first, uiMore(entries, { size: String(kind).includes("small") || first?.classList?.contains("small") ? "s" : "m" }));
 }
 
 /**
  * The buttons of a row or a card as they were written, laid out by the same rule: up to two stay as they are; of
- * three or more the main one (the primary, else the first) stays and the others go under its arrow, each doing what
+ * three or more the main one (the primary, else the first) stays and the others go into a "⋯" beside it, each doing what
  * its button does. What is not a button (a chip, a note) stays beside.
  */
 function foldActions(items, kind = "") {
@@ -1553,7 +1568,7 @@ function foldActions(items, kind = "") {
   const main = buttons.find((b) => b.classList.contains("primary")) ?? buttons[0];
   const entries = buttons
     .filter((b) => b !== main)
-    .map((b) => ({ label: b.textContent.trim() || b.title || b.getAttribute("aria-label") || "", iconEl: b.querySelector("svg")?.cloneNode(true) ?? h("span", { class: "ico" }), danger: b.classList.contains("danger"), off: b.disabled, ...(b.tagName === "A" ? { href: b.getAttribute("href"), newTab: b.target === "_blank" } : { run: () => b.click() }) }));
+    .map((b) => ({ label: b.textContent.trim() || b.title || b.getAttribute("aria-label") || "", iconEl: b.querySelector("svg")?.cloneNode(true) ?? blankIcon(), danger: b.classList.contains("danger"), off: b.disabled, ...(b.tagName === "A" ? { href: b.getAttribute("href"), newTab: b.target === "_blank" } : { run: () => b.click() }) }));
   const joined = oneAndMore(main, entries, [kind, main.classList.contains("small") ? "small" : "", main.classList.contains("primary") ? "primary" : ""].join(" "));
   return [joined, ...all.filter((x) => !pressable(x))];
 }
@@ -1627,7 +1642,7 @@ async function dockerDialog() {
     h("header", null, h("h2", { class: "grow" }, t("docker.title")), closeX(() => dialog)),
     h("p", null, t("docker.what")),
     h("p", { class: "muted small" }, t("docker.why")),
-    h("p", { class: "cmd" }, icon("terminal"), info.install),
+    uiCommand(info.install),
     h("p", { class: "muted small" }, t("docker.how")),
     error,
     h(
@@ -1660,14 +1675,16 @@ function activityItem(entry, when) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.machine && t("activity.onMachine", { name: entry.machine }), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user === "disk" ? t("activity.byDisk") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
-  return h(
-    "div",
-    { class: "activity-item" },
-    icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
-    h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: group === "modules" && entry.detail ? moduleName(entry.detail) : (entry.detail ?? "") }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
-    entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
-  );
+  const by = entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user === "disk" ? t("activity.byDisk") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null;
+  const sub = [entry.machine && t("activity.onMachine", { name: entry.machine }), by, group === "auth" ? entry.detail : null, failed ? entry.detail : null].filter(Boolean).join(" · ");
+  return uiRow({
+    mode: "event",
+    lead: { icon: group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), tone: failed ? "bad" : null },
+    name: has(key) ? t(key, { app: title, user: entry.user ?? "", target: group === "modules" && entry.detail ? moduleName(entry.detail) : (entry.detail ?? "") }) : entry.code,
+    sub: sub || null,
+    time: typeof when === "string" ? when : ago(entry.ts),
+    action: entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 ? button(t("activity.undo"), { class: "small", onclick: () => undoUpdate(entry) }, "undo") : null,
+  });
 }
 
 /** How long after an update its "Undo" is offered: pre-update snapshots are few and get replaced */

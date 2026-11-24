@@ -25,7 +25,7 @@ async function main() {
     server = await api("GET", "/api/state");
   } catch {
     await loadLanguage("en");
-    $app.replaceChildren(h("main", { class: "center" }, h("p", { class: "banner" }, t("error.network"))));
+    $app.replaceChildren(h("main", { class: "center" }, uiNotice({ tone: "warn", text: t("error.network") })));
     return setTimeout(main, 3000);
   }
   applyAppearance((state.appearance = server.appearance ?? null));
